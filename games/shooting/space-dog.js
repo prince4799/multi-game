@@ -25,15 +25,18 @@
   let dogImg       = null;
   let cometImg     = null;
   let explosionImg = null;
+  let crystalImg   = null;
+  let heartImg     = null;
 
   let stars      = [];
   let lasers     = [];
   let comets     = [];
   let crystals   = [];
   let bonusStars = [];
+  let hearts     = [];
   let particles  = [];
   let explosions = [];
-  let timers     = { comet: 0, crystal: 0, star: 0 };
+  let timers     = { comet: 0, crystal: 0, star: 0, heart: 0 };
 
   const joystick = {
     active: false, touchId: null,
@@ -75,7 +78,6 @@
     start(container) {
       _buildDOM(container);
       _loadAssets();
-      _startGame();
     },
     destroy() {
       _stopLoop();
@@ -103,7 +105,7 @@
     emoji:       '🐕',
     difficulty:  'medium',
     controls:    { dpad: false, actions: false, center: false },
-    version:     '1.0',
+    version:     '1.1',
     init:        (container) => SpaceDog.start(container),
     destroy:     () => SpaceDog.destroy(),
     restart:     () => SpaceDog.restart()
@@ -212,18 +214,39 @@
   }
 
   // ----------------------------------------------------------------
-  //  ASSETS
+  //  ASSETS - PRELOAD BEFORE GAME START
   // ----------------------------------------------------------------
   function _loadAssets() {
     dogImg       = new Image();
     cometImg     = new Image();
     explosionImg = new Image();
+    crystalImg   = new Image();
+    heartImg     = new Image();
+
     dogImg.src       = 'games/assets/dog.gif';
     cometImg.src     = 'games/assets/comet.png';
     explosionImg.src = 'games/assets/explosion.png';
-    dogImg.onerror       = () => {};
-    cometImg.onerror     = () => {};
-    explosionImg.onerror = () => {};
+    crystalImg.src   = 'games/assets/dodge-crystal.jpg';
+    heartImg.src     = 'games/assets/heart.png';
+
+    const assets = [dogImg, cometImg, explosionImg, crystalImg, heartImg];
+    let loaded = 0;
+
+    const checkAllLoaded = () => {
+      loaded++;
+      if (loaded === assets.length) {
+        _startGame();
+      }
+    };
+
+    assets.forEach(img => {
+      if (img.complete) {
+        checkAllLoaded();
+      } else {
+        img.onload = checkAllLoaded;
+        img.onerror = checkAllLoaded; // Continue even if asset fails
+      }
+    });
   }
 
   // ----------------------------------------------------------------
@@ -529,7 +552,7 @@
   }
 
   // ----------------------------------------------------------------
-  //  CRYSTALS
+  //  CRYSTALS - NOW WITH IMAGE ASSET
   // ----------------------------------------------------------------
   function _spawnCrystal() {
     crystals.push({
@@ -547,15 +570,25 @@
     crystals.forEach(c => {
       _ctx.save();
       _ctx.translate(c.x, c.y); _ctx.rotate(c.angle);
-      const s = c.size, p = 1 + 0.1 * Math.sin(c.pulse);
-      _ctx.beginPath();
-      _ctx.moveTo(0, -s * p); _ctx.lineTo(s * 0.6 * p, 0);
-      _ctx.lineTo(0, s * p);  _ctx.lineTo(-s * 0.6 * p, 0);
-      _ctx.closePath();
-      const gr = _ctx.createLinearGradient(0, -s, 0, s);
-      gr.addColorStop(0, '#00ffff'); gr.addColorStop(0.5, '#0088ff'); gr.addColorStop(1, '#cc00ff');
-      _ctx.fillStyle = gr; _ctx.fill();
-      _ctx.strokeStyle = 'rgba(255,255,255,0.8)'; _ctx.lineWidth = 1.5; _ctx.stroke();
+      const s = c.size * 2.5;
+      const p = 1 + 0.1 * Math.sin(c.pulse);
+      
+      if (imgOk(crystalImg)) {
+        _ctx.globalAlpha = 0.9;
+        _ctx.drawImage(crystalImg, -s/2 * p, -s/2 * p, s * p, s * p);
+        _ctx.globalAlpha = 1;
+      } else {
+        // Fallback SVG if image doesn't load
+        _ctx.beginPath();
+        _ctx.moveTo(0, -c.size * p); _ctx.lineTo(c.size * 0.6 * p, 0);
+        _ctx.lineTo(0, c.size * p);  _ctx.lineTo(-c.size * 0.6 * p, 0);
+        _ctx.closePath();
+        const gr = _ctx.createLinearGradient(0, -c.size, 0, c.size);
+        gr.addColorStop(0, '#00ffff'); gr.addColorStop(0.5, '#0088ff'); gr.addColorStop(1, '#cc00ff');
+        _ctx.fillStyle = gr; _ctx.fill();
+        _ctx.strokeStyle = 'rgba(255,255,255,0.8)'; _ctx.lineWidth = 1.5; _ctx.stroke();
+      }
+      
       _ctx.shadowColor = '#00ffff'; _ctx.shadowBlur = 12;
       _ctx.strokeStyle = 'rgba(0,255,255,0.3)'; _ctx.lineWidth = 1; _ctx.stroke();
       _ctx.shadowBlur = 0;
@@ -595,6 +628,59 @@
       _ctx.fillStyle = '#ffd700'; _ctx.fill();
       _ctx.shadowBlur = 0;
       _ctx.strokeStyle = 'rgba(255,255,255,0.6)'; _ctx.lineWidth = 1; _ctx.stroke();
+      _ctx.restore();
+    });
+  }
+
+  // ----------------------------------------------------------------
+  //  BONUS HEARTS (LIFE POWER-UP)
+  // ----------------------------------------------------------------
+  function _spawnHeart() {
+    hearts.push({
+      x: W() + 30, y: 30 + Math.random() * (H() - 60),
+      size: 25, speed: 1.8 + Math.random() * 1.5,
+      pulse: Math.random() * Math.PI * 2,
+      bob: Math.random() * Math.PI * 2
+    });
+  }
+  function _updateHearts() {
+    hearts.forEach(h => { 
+      h.x -= h.speed; 
+      h.pulse += 0.08;
+      h.bob += 0.06;
+    });
+    hearts = hearts.filter(h => h.x > -40);
+  }
+  function _drawHearts() {
+    hearts.forEach(h => {
+      const bobOffset = Math.sin(h.bob) * 5;
+      const scale = 1 + Math.sin(h.pulse) * 0.15;
+      const s = h.size * scale;
+      
+      _ctx.save();
+      _ctx.translate(h.x, h.y + bobOffset);
+      
+      if (imgOk(heartImg)) {
+        _ctx.drawImage(heartImg, -s/2, -s/2, s, s);
+      } else {
+        // Fallback heart emoji
+        _ctx.font = `${s * 1.5}px serif`;
+        _ctx.textAlign = 'center';
+        _ctx.textBaseline = 'middle';
+        _ctx.fillText('❤️', 0, 0);
+      }
+      
+      // Glow effect
+      _ctx.shadowColor = '#ff0066';
+      _ctx.shadowBlur = 15 + 8 * Math.sin(h.pulse);
+      _ctx.globalAlpha = 0.3;
+      _ctx.beginPath();
+      _ctx.arc(0, 0, s * 0.8, 0, Math.PI * 2);
+      _ctx.fillStyle = '#ff0066';
+      _ctx.fill();
+      _ctx.globalAlpha = 1;
+      _ctx.shadowBlur = 0;
+      
       _ctx.restore();
     });
   }
@@ -680,8 +766,8 @@
     game.time       = 0;
     game.shakeTimer = 0;
     lasers = []; comets = []; crystals = [];
-    bonusStars = []; particles = []; explosions = [];
-    timers = { comet: 50, crystal: 180, star: 280 };
+    bonusStars = []; hearts = []; particles = []; explosions = [];
+    timers = { comet: 50, crystal: 180, star: 280, heart: 400 };
     keys = {}; fireHeld = false;
     _initStars();
     _resetPlayer();
@@ -696,14 +782,18 @@
       localStorage.setItem('ssd_hi', game.highScore);
     }
     _updateHUD();
-    if (window.GameRegistry && window.GameRegistry.onGameOver) {
-      window.GameRegistry.onGameOver({
-        score:     game.score,
-        highScore: game.highScore,
-        emoji:     '🐕',
-        heading:   'Game Over!'
-      });
-    }
+    
+    // Continue animation loop for visual effects
+    setTimeout(() => {
+      if (window.GameRegistry && window.GameRegistry.onGameOver) {
+        window.GameRegistry.onGameOver({
+          score:     game.score,
+          highScore: game.highScore,
+          emoji:     '🐕',
+          heading:   'Game Over!'
+        });
+      }
+    }, 100);
   }
 
   function _hitPlayer() {
@@ -715,7 +805,6 @@
     _spawnExplosion(player.x, player.y, 80);
     _updateHUD();
     if (game.lives <= 0) {
-      game.running = false;
       _spawnExplosion(player.x, player.y, 150);
       _spawnParticles(player.x, player.y, '#ff8800', 30, 6);
       setTimeout(_gameOver, 800);
@@ -800,9 +889,13 @@
       _spawnBonusStar();
       timers.star = 180 + Math.random() * 140;
     }
+    if (--timers.heart <= 0) {
+      _spawnHeart();
+      timers.heart = 300 + Math.random() * 200;
+    }
 
     _updateStars(); _updateLasers(); _updateComets();
-    _updateCrystals(); _updateBonusStars();
+    _updateCrystals(); _updateBonusStars(); _updateHearts();
     _updateExplosions(); _updateParticles();
 
     // Laser vs comet
@@ -829,6 +922,8 @@
     }
 
     const pHitR = Math.min(player.w, player.h) * 0.32;
+    
+    // Player collision with comets
     for (let i = comets.length - 1; i >= 0; i--) {
       const c = comets[i];
       if (_circles(player.x, player.y, pHitR, c.x, c.y, c.r * 0.75)) {
@@ -837,6 +932,8 @@
         comets.splice(i, 1); break;
       }
     }
+    
+    // Player collision with crystals
     for (let i = crystals.length - 1; i >= 0; i--) {
       const c = crystals[i];
       if (_circles(player.x, player.y, pHitR, c.x, c.y, c.size * 0.55)) {
@@ -844,6 +941,8 @@
         crystals.splice(i, 1); break;
       }
     }
+    
+    // Player collection of bonus stars
     for (let i = bonusStars.length - 1; i >= 0; i--) {
       const s = bonusStars[i];
       if (_circles(player.x, player.y, pHitR + 12, s.x, s.y, s.size)) {
@@ -854,6 +953,27 @@
         _updateHUD();
       }
     }
+    
+    // Player collection of hearts (MAX 3 LIVES)
+    for (let i = hearts.length - 1; i >= 0; i--) {
+      const h = hearts[i];
+      if (_circles(player.x, player.y, pHitR + 15, h.x, h.y, h.size * 0.6)) {
+        if (game.lives < 3) {
+          game.lives++;
+          _spawnParticles(h.x, h.y, '#ff0066', 15, 4);
+          _spawnScorePopup(h.x, h.y - 25, '+1 LIFE ❤️');
+          _updateHUD();
+        } else {
+          // Already at max lives - bonus points instead
+          game.score += 100;
+          _spawnParticles(h.x, h.y, '#ffd700', 15, 4);
+          _spawnScorePopup(h.x, h.y - 25, '+100');
+          _updateHUD();
+        }
+        hearts.splice(i, 1);
+      }
+    }
+    
     if (game.shakeTimer > 0) game.shakeTimer--;
   }
 
@@ -878,11 +998,12 @@
         (Math.random() - 0.5) * intensity * 2
       );
     }
-    _drawStars(); _drawBonusStars(); _drawLasers();
+    _drawStars(); _drawBonusStars(); _drawHearts(); _drawLasers();
     _drawComets(); _drawCrystals();
     if (game.lives > 0 || player.invincible > 0) _drawPlayer();
     _drawExplosions(); _drawParticles();
 
+    // Warning indicator for nearby crystals
     crystals.forEach(c => {
       const dist = Math.hypot(c.x - player.x, c.y - player.y);
       if (dist < 250) {
@@ -905,7 +1026,8 @@
     _running = true;
     const loop = () => {
       if (!_running) return;
-      _update(); _draw();
+      _update(); 
+      _draw();
       _animId = requestAnimationFrame(loop);
     };
     _animId = requestAnimationFrame(loop);
