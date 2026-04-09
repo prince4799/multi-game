@@ -218,9 +218,9 @@
     dogImg       = new Image();
     cometImg     = new Image();
     explosionImg = new Image();
-    dogImg.src       = 'games/shooting/assets/dog.gif';
-    cometImg.src     = 'games/shooting/assets/comet.png';
-    explosionImg.src = 'games/shooting/assets/explosion.png';
+    dogImg.src       = 'games/assets/dog.gif';
+    cometImg.src     = 'games/assets/comet.png';
+    explosionImg.src = 'games/assets/explosion.png';
     dogImg.onerror       = () => {};
     cometImg.onerror     = () => {};
     explosionImg.onerror = () => {};
