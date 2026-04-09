@@ -8,6 +8,13 @@
   'use strict';
 
   // ----------------------------------------------------------------
+  //  CONSTANTS
+  // ----------------------------------------------------------------
+  const MAX_LIVES      = 5;    // absolute cap on lives
+  const START_LIVES    = 3;    // lives at game start
+  const HEART_MAX_GIVE = 5;    // heart gives life only below this
+
+  // ----------------------------------------------------------------
   //  PRIVATE STATE
   // ----------------------------------------------------------------
   let _canvas    = null;
@@ -17,7 +24,9 @@
   let _fireBtn   = null;
   let _animId    = null;
   let _running   = false;
+  let _gameOverPending = false;   // FIX: prevents multiple gameOver calls
   let _resizeHandler = null;
+  let _loadingEl = null;          // FIX: loading overlay element
 
   let keys     = {};
   let fireHeld = false;
@@ -48,7 +57,7 @@
   };
 
   const game = {
-    running: false, score: 0, lives: 3,
+    running: false, score: 0, lives: START_LIVES,
     highScore: parseInt(localStorage.getItem('ssd_hi') || '0'),
     difficulty: 1, time: 0,
     shakeTimer: 0, shakeIntensity: 0
@@ -72,30 +81,33 @@
   function H() { return _canvas ? _canvas.height : window.innerHeight; }
 
   // ----------------------------------------------------------------
-  //  PUBLIC GAME OBJECT  (used by GameRegistry)
+  //  PUBLIC GAME OBJECT
   // ----------------------------------------------------------------
   const SpaceDog = {
     start(container) {
       _buildDOM(container);
+      _showLoadingOverlay();   // FIX: show loading BEFORE assets load
       _loadAssets();
     },
     destroy() {
       _stopLoop();
       _removeListeners();
-      game.running = false;
-      _running = false;
-      [_fireBtn, _joyCanvas, _canvas].forEach(el => {
+      game.running     = false;
+      _running         = false;
+      _gameOverPending = false;
+      [_loadingEl, _fireBtn, _joyCanvas, _canvas].forEach(el => {
         if (el && el.parentNode) el.parentNode.removeChild(el);
       });
-      _canvas = _ctx = _joyCanvas = _jctx = _fireBtn = null;
+      _canvas = _ctx = _joyCanvas = _jctx = _fireBtn = _loadingEl = null;
     },
     restart() {
+      _hideLoadingOverlay();
       _startGame();
     }
   };
 
   // ----------------------------------------------------------------
-  //  REGISTER — same pattern as math-speed.js / memory-match.js
+  //  REGISTER
   // ----------------------------------------------------------------
   GameRegistry.register({
     id:          'space-dog',
@@ -105,11 +117,122 @@
     emoji:       '🐕',
     difficulty:  'medium',
     controls:    { dpad: false, actions: false, center: false },
-    version:     '1.1',
+    version:     '1.2',
     init:        (container) => SpaceDog.start(container),
     destroy:     () => SpaceDog.destroy(),
     restart:     () => SpaceDog.restart()
   });
+
+  // ----------------------------------------------------------------
+  //  LOADING OVERLAY  — FIX #3
+  // ----------------------------------------------------------------
+  function _showLoadingOverlay() {
+    // Remove any existing one first
+    _hideLoadingOverlay();
+
+    _loadingEl = document.createElement('div');
+    Object.assign(_loadingEl.style, {
+      position:        'absolute',
+      inset:           '0',
+      zIndex:          '100',
+      display:         'flex',
+      flexDirection:   'column',
+      alignItems:      'center',
+      justifyContent:  'center',
+      background:      'radial-gradient(ellipse at center, #0a0a2e, #000)',
+      gap:             '20px'
+    });
+
+    _loadingEl.innerHTML = `
+      <div style="
+        font-size: clamp(3rem, 10vw, 5rem);
+        animation: ssd-float 2s ease-in-out infinite;
+        filter: drop-shadow(0 0 20px #0ff);
+      ">🐕</div>
+
+      <div style="
+        font-family: 'Orbitron', sans-serif;
+        font-size: clamp(1rem, 3vw, 1.4rem);
+        font-weight: 700;
+        color: #0ff;
+        text-shadow: 0 0 20px #0ff;
+        letter-spacing: 3px;
+      ">SUPER SPACE DOG</div>
+
+      <!-- Spinner -->
+      <div style="
+        width: 48px; height: 48px;
+        border: 4px solid rgba(0,255,255,0.15);
+        border-top-color: #0ff;
+        border-radius: 50%;
+        animation: ssd-spin 0.8s linear infinite;
+      "></div>
+
+      <div id="ssd-load-text" style="
+        color: rgba(255,255,255,0.45);
+        font-size: 0.8rem;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        font-family: 'Rajdhani', sans-serif;
+      ">Loading assets...</div>
+
+      <!-- Progress bar -->
+      <div style="
+        width: clamp(160px, 40vw, 260px);
+        height: 3px;
+        background: rgba(255,255,255,0.08);
+        border-radius: 2px;
+        overflow: hidden;
+      ">
+        <div id="ssd-load-bar" style="
+          height: 100%;
+          width: 0%;
+          background: linear-gradient(90deg, #0ff, #bf00ff);
+          border-radius: 2px;
+          transition: width 0.3s ease;
+        "></div>
+      </div>
+    `;
+
+    // Inject keyframes if not already present
+    if (!document.getElementById('ssd-keyframes')) {
+      const kf = document.createElement('style');
+      kf.id = 'ssd-keyframes';
+      kf.textContent = `
+        @keyframes ssd-spin  { to { transform: rotate(360deg); } }
+        @keyframes ssd-float {
+          0%,100% { transform: translateY(0);    }
+          50%     { transform: translateY(-12px); }
+        }
+      `;
+      document.head.appendChild(kf);
+    }
+
+    if (_canvas && _canvas.parentNode) {
+      _canvas.parentNode.appendChild(_loadingEl);
+    }
+  }
+
+  function _updateLoadingProgress(loaded, total) {
+    const bar  = document.getElementById('ssd-load-bar');
+    const text = document.getElementById('ssd-load-text');
+    if (bar)  bar.style.width  = `${Math.round((loaded / total) * 100)}%`;
+    if (text) text.textContent = `Loading assets... ${loaded}/${total}`;
+  }
+
+  function _hideLoadingOverlay() {
+    if (_loadingEl) {
+      // Fade out smoothly
+      _loadingEl.style.transition = 'opacity 0.4s ease';
+      _loadingEl.style.opacity    = '0';
+      setTimeout(() => {
+        if (_loadingEl && _loadingEl.parentNode) {
+          _loadingEl.parentNode.removeChild(_loadingEl);
+        }
+        _loadingEl = null;
+      }, 420);
+    }
+  }
 
   // ----------------------------------------------------------------
   //  DOM BUILDER
@@ -174,6 +297,7 @@
 
     // HUD
     const hud = document.createElement('div');
+    hud.id = 'ssd-hud';
     Object.assign(hud.style, {
       position:       'absolute', top: '0', left: '0',
       width:          '100%',
@@ -188,15 +312,15 @@
       <span style="color:#fff;font-size:17px;text-shadow:0 0 8px rgba(0,200,255,.6)">
         ⭐ Score: <b id="ssd-score" style="color:#0ff">0</b>
       </span>
-      <span id="ssd-lives" style="color:#fff;font-size:20px;letter-spacing:2px">❤️❤️❤️</span>
+      <span id="ssd-lives" style="color:#fff;font-size:20px;letter-spacing:2px">
+        ${'❤️'.repeat(START_LIVES)}
+      </span>
     `;
     container.appendChild(hud);
 
-    // Resize
     _resize();
     _resizeHandler = () => { _resize(); _initStars(); };
     window.addEventListener('resize', _resizeHandler);
-
     _attachListeners();
   }
 
@@ -214,7 +338,7 @@
   }
 
   // ----------------------------------------------------------------
-  //  ASSETS - PRELOAD BEFORE GAME START
+  //  ASSET LOADING  — FIX #3: tracks progress + shows overlay
   // ----------------------------------------------------------------
   function _loadAssets() {
     dogImg       = new Image();
@@ -223,29 +347,35 @@
     crystalImg   = new Image();
     heartImg     = new Image();
 
-    dogImg.src       = 'games/assets/dog.gif';
-    cometImg.src     = 'games/assets/comet.png';
-    explosionImg.src = 'games/assets/explosion.png';
-    crystalImg.src   = 'games/assets/dodge-crystal.jpg';
-    heartImg.src     = 'games/assets/heart.png';
+    const assets = [
+      { img: dogImg,       src: 'games/assets/dog.gif'         },
+      { img: cometImg,     src: 'games/assets/comet.png'       },
+      { img: explosionImg, src: 'games/assets/explosion.png'   },
+      { img: crystalImg,   src: 'games/assets/dodge-crystal.jpg' },
+      { img: heartImg,     src: 'games/assets/heart.png'       }
+    ];
 
-    const assets = [dogImg, cometImg, explosionImg, crystalImg, heartImg];
-    let loaded = 0;
+    const total  = assets.length;
+    let   loaded = 0;
 
-    const checkAllLoaded = () => {
+    const onDone = () => {
       loaded++;
-      if (loaded === assets.length) {
-        _startGame();
+      _updateLoadingProgress(loaded, total);
+      if (loaded >= total) {
+        // Small delay so progress bar hits 100% visibly
+        setTimeout(() => {
+          _hideLoadingOverlay();
+          _startGame();
+        }, 300);
       }
     };
 
-    assets.forEach(img => {
-      if (img.complete) {
-        checkAllLoaded();
-      } else {
-        img.onload = checkAllLoaded;
-        img.onerror = checkAllLoaded; // Continue even if asset fails
-      }
+    assets.forEach(({ img, src }) => {
+      img.onload  = onDone;
+      img.onerror = onDone;  // graceful — fallback drawing used
+      img.src     = src;
+      // If somehow already cached and complete
+      if (img.complete) onDone();
     });
   }
 
@@ -259,7 +389,7 @@
       e.preventDefault();
     }
   };
-  const _onKeyUp   = (e) => { keys[e.code] = false; };
+  const _onKeyUp = (e) => { keys[e.code] = false; };
 
   let _mouseJoy = false;
   const _onMouseMove = (e) => {
@@ -537,7 +667,7 @@
       _ctx.save();
       _ctx.globalAlpha = Math.max(0, alpha);
       if (imgOk(explosionImg)) {
-        _ctx.drawImage(explosionImg, e.x - s / 2, e.y - s / 2, s, s);
+                _ctx.drawImage(explosionImg, e.x - s / 2, e.y - s / 2, s, s);
       } else {
         const g = _ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, s / 2);
         g.addColorStop(0, 'rgba(255,200,50,0.9)');
@@ -552,7 +682,7 @@
   }
 
   // ----------------------------------------------------------------
-  //  CRYSTALS - NOW WITH IMAGE ASSET
+  //  CRYSTALS
   // ----------------------------------------------------------------
   function _spawnCrystal() {
     crystals.push({
@@ -572,23 +702,26 @@
       _ctx.translate(c.x, c.y); _ctx.rotate(c.angle);
       const s = c.size * 2.5;
       const p = 1 + 0.1 * Math.sin(c.pulse);
-      
+
       if (imgOk(crystalImg)) {
         _ctx.globalAlpha = 0.9;
-        _ctx.drawImage(crystalImg, -s/2 * p, -s/2 * p, s * p, s * p);
+        _ctx.drawImage(crystalImg, -s / 2 * p, -s / 2 * p, s * p, s * p);
         _ctx.globalAlpha = 1;
       } else {
-        // Fallback SVG if image doesn't load
         _ctx.beginPath();
         _ctx.moveTo(0, -c.size * p); _ctx.lineTo(c.size * 0.6 * p, 0);
         _ctx.lineTo(0, c.size * p);  _ctx.lineTo(-c.size * 0.6 * p, 0);
         _ctx.closePath();
         const gr = _ctx.createLinearGradient(0, -c.size, 0, c.size);
-        gr.addColorStop(0, '#00ffff'); gr.addColorStop(0.5, '#0088ff'); gr.addColorStop(1, '#cc00ff');
+        gr.addColorStop(0, '#00ffff');
+        gr.addColorStop(0.5, '#0088ff');
+        gr.addColorStop(1, '#cc00ff');
         _ctx.fillStyle = gr; _ctx.fill();
-        _ctx.strokeStyle = 'rgba(255,255,255,0.8)'; _ctx.lineWidth = 1.5; _ctx.stroke();
+        _ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+        _ctx.lineWidth = 1.5; _ctx.stroke();
       }
-      
+
+      // Glow outline regardless of image
       _ctx.shadowColor = '#00ffff'; _ctx.shadowBlur = 12;
       _ctx.strokeStyle = 'rgba(0,255,255,0.3)'; _ctx.lineWidth = 1; _ctx.stroke();
       _ctx.shadowBlur = 0;
@@ -633,54 +766,65 @@
   }
 
   // ----------------------------------------------------------------
-  //  BONUS HEARTS (LIFE POWER-UP)
+  //  BONUS HEARTS  — FIX #2: correct MAX_LIVES logic
   // ----------------------------------------------------------------
   function _spawnHeart() {
+    // Only spawn heart if player CAN benefit (below max)
+    // Still spawn for score bonus opportunity if at max
     hearts.push({
       x: W() + 30, y: 30 + Math.random() * (H() - 60),
       size: 25, speed: 1.8 + Math.random() * 1.5,
       pulse: Math.random() * Math.PI * 2,
-      bob: Math.random() * Math.PI * 2
+      bob:   Math.random() * Math.PI * 2
     });
   }
   function _updateHearts() {
-    hearts.forEach(h => { 
-      h.x -= h.speed; 
+    hearts.forEach(h => {
+      h.x     -= h.speed;
       h.pulse += 0.08;
-      h.bob += 0.06;
+      h.bob   += 0.06;
     });
     hearts = hearts.filter(h => h.x > -40);
   }
   function _drawHearts() {
     hearts.forEach(h => {
       const bobOffset = Math.sin(h.bob) * 5;
-      const scale = 1 + Math.sin(h.pulse) * 0.15;
-      const s = h.size * scale;
-      
+      const scale     = 1 + Math.sin(h.pulse) * 0.15;
+      const s         = h.size * scale;
+
       _ctx.save();
       _ctx.translate(h.x, h.y + bobOffset);
-      
+
       if (imgOk(heartImg)) {
-        _ctx.drawImage(heartImg, -s/2, -s/2, s, s);
+        // Draw image centered
+        _ctx.drawImage(heartImg, -s, -s, s * 2, s * 2);
       } else {
-        // Fallback heart emoji
+        // Emoji fallback
         _ctx.font = `${s * 1.5}px serif`;
-        _ctx.textAlign = 'center';
+        _ctx.textAlign    = 'center';
         _ctx.textBaseline = 'middle';
         _ctx.fillText('❤️', 0, 0);
       }
-      
-      // Glow effect
-      _ctx.shadowColor = '#ff0066';
-      _ctx.shadowBlur = 15 + 8 * Math.sin(h.pulse);
-      _ctx.globalAlpha = 0.3;
+
+      // Pulsing glow ring
+      _ctx.shadowColor  = '#ff0066';
+      _ctx.shadowBlur   = 15 + 8 * Math.sin(h.pulse);
+      _ctx.globalAlpha  = 0.25;
       _ctx.beginPath();
-      _ctx.arc(0, 0, s * 0.8, 0, Math.PI * 2);
+      _ctx.arc(0, 0, s * 0.9, 0, Math.PI * 2);
       _ctx.fillStyle = '#ff0066';
       _ctx.fill();
       _ctx.globalAlpha = 1;
-      _ctx.shadowBlur = 0;
-      
+      _ctx.shadowBlur  = 0;
+
+      // Label: show what collecting gives
+      const atMax = game.lives >= MAX_LIVES;
+      _ctx.font      = 'bold 10px sans-serif';
+      _ctx.fillStyle = atMax ? '#ffd700' : '#ff88aa';
+      _ctx.textAlign = 'center';
+      _ctx.textBaseline = 'bottom';
+      _ctx.fillText(atMax ? '+100' : '+LIFE', 0, -s - 4);
+
       _ctx.restore();
     });
   }
@@ -693,7 +837,8 @@
       const ang = Math.random() * Math.PI * 2;
       const spd = 0.5 + Math.random() * spread;
       particles.push({
-        x, y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+        x, y,
+        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
         life: 25 + Math.random() * 20, maxLife: 45,
         r: 1.5 + Math.random() * 3, color
       });
@@ -715,12 +860,15 @@
       const a = Math.max(0, p.life / p.maxLife);
       _ctx.save(); _ctx.globalAlpha = a;
       if (p.text) {
-        _ctx.fillStyle = 'gold'; _ctx.font = 'bold 18px sans-serif';
-        _ctx.textAlign = 'center';
-        _ctx.shadowColor = 'rgba(255,200,0,.8)'; _ctx.shadowBlur = 8;
+        _ctx.fillStyle    = 'gold';
+        _ctx.font         = 'bold 18px sans-serif';
+        _ctx.textAlign    = 'center';
+        _ctx.shadowColor  = 'rgba(255,200,0,.8)';
+        _ctx.shadowBlur   = 8;
         _ctx.fillText(p.text, p.x, p.y);
       } else {
-        _ctx.beginPath(); _ctx.arc(p.x, p.y, p.r * a, 0, Math.PI * 2);
+        _ctx.beginPath();
+        _ctx.arc(p.x, p.y, p.r * a, 0, Math.PI * 2);
         _ctx.fillStyle = p.color; _ctx.fill();
       }
       _ctx.restore();
@@ -728,7 +876,7 @@
   }
 
   // ----------------------------------------------------------------
-  //  COLLISION
+  //  COLLISION HELPERS
   // ----------------------------------------------------------------
   function _circles(ax, ay, ar, bx, by, br) {
     const dx = ax - bx, dy = ay - by;
@@ -741,13 +889,24 @@
   }
 
   // ----------------------------------------------------------------
-  //  HUD
+  //  HUD  — FIX #2: renders correct number of hearts up to MAX_LIVES
   // ----------------------------------------------------------------
   function _updateHUD() {
     const scoreEl = document.getElementById('ssd-score');
     const livesEl = document.getElementById('ssd-lives');
+
     if (scoreEl) scoreEl.textContent = game.score;
-    if (livesEl) livesEl.textContent = game.lives > 0 ? '❤️'.repeat(game.lives) : '💀';
+
+    if (livesEl) {
+      if (game.lives <= 0) {
+        livesEl.textContent = '💀';
+      } else {
+        // Cap display at MAX_LIVES so it never overflows UI
+        const display = Math.min(game.lives, MAX_LIVES);
+        livesEl.textContent = '❤️'.repeat(display);
+      }
+    }
+
     const gs = document.getElementById('game-score-display');
     const gb = document.getElementById('game-best-display');
     if (gs) gs.textContent = game.score;
@@ -759,32 +918,54 @@
   // ----------------------------------------------------------------
   function _startGame() {
     _stopLoop();
-    game.running    = true;
-    game.score      = 0;
-    game.lives      = 3;
-    game.difficulty = 1;
-    game.time       = 0;
-    game.shakeTimer = 0;
-    lasers = []; comets = []; crystals = [];
-    bonusStars = []; hearts = []; particles = []; explosions = [];
+
+    // Reset all state cleanly
+    game.running         = true;
+    game.score           = 0;
+    game.lives           = START_LIVES;   // always start with START_LIVES
+    game.difficulty      = 1;
+    game.time            = 0;
+    game.shakeTimer      = 0;
+    game.shakeIntensity  = 0;
+    _gameOverPending     = false;         // FIX #1: reset flag
+
+    lasers     = [];
+    comets     = [];
+    crystals   = [];
+    bonusStars = [];
+    hearts     = [];
+    particles  = [];
+    explosions = [];
+
     timers = { comet: 50, crystal: 180, star: 280, heart: 400 };
-    keys = {}; fireHeld = false;
+    keys     = {};
+    fireHeld = false;
+
     _initStars();
     _resetPlayer();
     _updateHUD();
     _startLoop();
   }
 
+  // FIX #1: _gameOver — called only once, stops loop properly
   function _gameOver() {
-    game.running = false;
+    if (_gameOverPending) return;   // already triggered — ignore
+    _gameOverPending = true;
+    game.running     = false;
+
+    // Save high score
     if (game.score > game.highScore) {
       game.highScore = game.score;
       localStorage.setItem('ssd_hi', game.highScore);
     }
+
     _updateHUD();
-    
-    // Continue animation loop for visual effects
+
+    // Let final explosion particles finish rendering (~800ms)
+    // then stop loop and show result screen
     setTimeout(() => {
+      _stopLoop();                  // FIX #1: stop loop HERE not before
+
       if (window.GameRegistry && window.GameRegistry.onGameOver) {
         window.GameRegistry.onGameOver({
           score:     game.score,
@@ -793,18 +974,26 @@
           heading:   'Game Over!'
         });
       }
-    }, 100);
+    }, 850);
   }
 
+  // FIX #1: _hitPlayer — game.running = false prevents further updates
   function _hitPlayer() {
     if (player.invincible > 0) return;
+    if (_gameOverPending)       return; // FIX #1: already dying
+
     game.lives--;
-    game.shakeTimer = 18; game.shakeIntensity = 8;
-    player.invincible = 100;
+    game.shakeTimer     = 18;
+    game.shakeIntensity = 8;
+    player.invincible   = 100;
+
     _spawnParticles(player.x, player.y, '#ff4444', 20, 5);
     _spawnExplosion(player.x, player.y, 80);
     _updateHUD();
+
     if (game.lives <= 0) {
+      // FIX #1: set running false immediately so no more hits register
+      game.running = false;
       _spawnExplosion(player.x, player.y, 150);
       _spawnParticles(player.x, player.y, '#ff8800', 30, 6);
       setTimeout(_gameOver, 800);
@@ -821,14 +1010,19 @@
       ? Math.min(1, joystick.opacity + 0.15)
       : Math.max(0, joystick.opacity - 0.08);
     if (joystick.opacity <= 0.01) return;
+
     const alpha = joystick.opacity;
     _jctx.save();
+
+    // Base ring
     _jctx.globalAlpha = alpha * 0.25;
     _jctx.beginPath();
     _jctx.arc(joystick.baseX, joystick.baseY, joystick.baseRadius, 0, Math.PI * 2);
     _jctx.fillStyle = '#ffffff'; _jctx.fill();
     _jctx.globalAlpha = alpha * 0.4;
     _jctx.strokeStyle = '#00ccff'; _jctx.lineWidth = 2.5; _jctx.stroke();
+
+    // Stick
     const sx = joystick.active ? joystick.stickX : joystick.baseX;
     const sy = joystick.active ? joystick.stickY : joystick.baseY;
     _jctx.globalAlpha = alpha * 0.7;
@@ -839,17 +1033,27 @@
     _jctx.fillStyle = sg; _jctx.fill();
     _jctx.globalAlpha = alpha * 0.9;
     _jctx.strokeStyle = '#00eeff'; _jctx.lineWidth = 2; _jctx.stroke();
+
     _jctx.restore();
   }
 
   // ----------------------------------------------------------------
-  //  UPDATE
+  //  UPDATE  — FIX #1: checks game.running at top
   // ----------------------------------------------------------------
   function _update() {
-    if (!game.running) return;
+    // FIX #1: if not running just update visuals (explosions/particles)
+    // so final death animation plays, but no gameplay logic runs
+    if (!game.running) {
+      _updateExplosions();
+      _updateParticles();
+      _updateStars();
+      return;
+    }
+
     game.time++;
     game.difficulty = 1 + game.time / 2200;
 
+    // Movement
     let dx = 0, dy = 0;
     if (keys['ArrowUp']    || keys['KeyW']) dy -= 1;
     if (keys['ArrowDown']  || keys['KeyS']) dy += 1;
@@ -863,8 +1067,8 @@
     }
 
     player.moveX = dx; player.moveY = dy;
-    player.x += dx * player.speed;
-    player.y += dy * player.speed;
+    player.x    += dx * player.speed;
+    player.y    += dy * player.speed;
 
     const margin = 15;
     player.x = Math.max(player.w / 2 + margin,
@@ -877,6 +1081,7 @@
     if (player.invincible   > 0) player.invincible--;
     player.animFrame++;
 
+    // Spawn timers
     if (--timers.comet <= 0) {
       _spawnComet();
       timers.comet = Math.max(15, 55 - game.difficulty * 5) + Math.random() * 22;
@@ -898,13 +1103,16 @@
     _updateCrystals(); _updateBonusStars(); _updateHearts();
     _updateExplosions(); _updateParticles();
 
+    // ---- COLLISIONS ----
+
     // Laser vs comet
     for (let li = lasers.length - 1; li >= 0; li--) {
       const l = lasers[li];
       for (let ci = comets.length - 1; ci >= 0; ci--) {
         const c = comets[ci];
         if (_laserHit(l, c.x, c.y, c.r * 0.85)) {
-          lasers.splice(li, 1); c.hp--;
+          lasers.splice(li, 1);
+          c.hp--;
           if (c.hp <= 0) {
             const pts = Math.round(c.r) * 2;
             game.score += pts;
@@ -922,27 +1130,31 @@
     }
 
     const pHitR = Math.min(player.w, player.h) * 0.32;
-    
-    // Player collision with comets
+
+    // Player vs comet
     for (let i = comets.length - 1; i >= 0; i--) {
       const c = comets[i];
       if (_circles(player.x, player.y, pHitR, c.x, c.y, c.r * 0.75)) {
-        _hitPlayer(); _spawnExplosion(c.x, c.y, c.r * 3);
+        _hitPlayer();
+        _spawnExplosion(c.x, c.y, c.r * 3);
         _spawnParticles(c.x, c.y, '#ff6600', 15, 5);
-        comets.splice(i, 1); break;
+        comets.splice(i, 1);
+        break;
       }
     }
-    
-    // Player collision with crystals
+
+    // Player vs crystal
     for (let i = crystals.length - 1; i >= 0; i--) {
       const c = crystals[i];
       if (_circles(player.x, player.y, pHitR, c.x, c.y, c.size * 0.55)) {
-        _hitPlayer(); _spawnParticles(c.x, c.y, '#00ffff', 12, 4);
-        crystals.splice(i, 1); break;
+        _hitPlayer();
+        _spawnParticles(c.x, c.y, '#00ffff', 12, 4);
+        crystals.splice(i, 1);
+        break;
       }
     }
-    
-    // Player collection of bonus stars
+
+    // Player vs bonus star
     for (let i = bonusStars.length - 1; i >= 0; i--) {
       const s = bonusStars[i];
       if (_circles(player.x, player.y, pHitR + 12, s.x, s.y, s.size)) {
@@ -953,27 +1165,28 @@
         _updateHUD();
       }
     }
-    
-    // Player collection of hearts (MAX 3 LIVES)
+
+    // Player vs heart  — FIX #2: clean MAX_LIVES logic
     for (let i = hearts.length - 1; i >= 0; i--) {
       const h = hearts[i];
       if (_circles(player.x, player.y, pHitR + 15, h.x, h.y, h.size * 0.6)) {
-        if (game.lives < 3) {
+        hearts.splice(i, 1);
+
+        if (game.lives < MAX_LIVES) {
+          // Give a life
           game.lives++;
           _spawnParticles(h.x, h.y, '#ff0066', 15, 4);
           _spawnScorePopup(h.x, h.y - 25, '+1 LIFE ❤️');
-          _updateHUD();
         } else {
-          // Already at max lives - bonus points instead
+          // Already at max — give points instead
           game.score += 100;
           _spawnParticles(h.x, h.y, '#ffd700', 15, 4);
-          _spawnScorePopup(h.x, h.y - 25, '+100');
-          _updateHUD();
+          _spawnScorePopup(h.x, h.y - 25, '+100 ⭐');
         }
-        hearts.splice(i, 1);
+        _updateHUD();
       }
     }
-    
+
     if (game.shakeTimer > 0) game.shakeTimer--;
   }
 
@@ -982,13 +1195,18 @@
   // ----------------------------------------------------------------
   function _draw() {
     if (!_ctx || !_canvas) return;
+
     _ctx.clearRect(0, 0, W(), H());
+
+    // Background
     const bg = _ctx.createLinearGradient(0, 0, W(), H());
     bg.addColorStop(0, '#050520');
     bg.addColorStop(0.5, '#0a0a35');
     bg.addColorStop(1, '#120828');
-    _ctx.fillStyle = bg; _ctx.fillRect(0, 0, W(), H());
+    _ctx.fillStyle = bg;
+    _ctx.fillRect(0, 0, W(), H());
 
+    // Screen shake
     const shaking = game.shakeTimer > 0;
     if (shaking) {
       const intensity = (game.shakeTimer / 18) * game.shakeIntensity;
@@ -998,43 +1216,64 @@
         (Math.random() - 0.5) * intensity * 2
       );
     }
-    _drawStars(); _drawBonusStars(); _drawHearts(); _drawLasers();
-    _drawComets(); _drawCrystals();
-    if (game.lives > 0 || player.invincible > 0) _drawPlayer();
-    _drawExplosions(); _drawParticles();
 
-    // Warning indicator for nearby crystals
-    crystals.forEach(c => {
-      const dist = Math.hypot(c.x - player.x, c.y - player.y);
-      if (dist < 250) {
-        const danger = 1 - dist / 250;
-        _ctx.save(); _ctx.globalAlpha = danger * 0.7;
-        _ctx.fillStyle = '#ff0000'; _ctx.font = 'bold 11px sans-serif';
-        _ctx.textAlign = 'center';
-        _ctx.fillText('⚠️ DODGE!', c.x, c.y - c.size - 12);
-        _ctx.restore();
-      }
-    });
+    _drawStars();
+    _drawBonusStars();
+    _drawHearts();
+    _drawLasers();
+    _drawComets();
+    _drawCrystals();
+
+    // FIX #1: draw player during invincible death flash, hide after confirmed dead
+    if (game.lives > 0 || player.invincible > 0) _drawPlayer();
+
+    _drawExplosions();
+    _drawParticles();
+
+    // Crystal danger warning
+    if (game.running) {
+      crystals.forEach(c => {
+        const dist = Math.hypot(c.x - player.x, c.y - player.y);
+        if (dist < 250) {
+          const danger = 1 - dist / 250;
+          _ctx.save();
+          _ctx.globalAlpha = danger * 0.7;
+          _ctx.fillStyle   = '#ff0000';
+          _ctx.font        = 'bold 11px sans-serif';
+          _ctx.textAlign   = 'center';
+          _ctx.fillText('⚠️ DODGE!', c.x, c.y - c.size - 12);
+          _ctx.restore();
+        }
+      });
+    }
+
     if (shaking) _ctx.restore();
+
     _drawJoystick();
   }
 
   // ----------------------------------------------------------------
-  //  LOOP
+  //  LOOP  — FIX #1: loop keeps running for death animation
   // ----------------------------------------------------------------
   function _startLoop() {
     _running = true;
     const loop = () => {
-      if (!_running) return;
-      _update(); 
+      if (!_running) return;   // only _stopLoop() kills the RAF
+      _update();
       _draw();
       _animId = requestAnimationFrame(loop);
     };
     _animId = requestAnimationFrame(loop);
   }
+
   function _stopLoop() {
     _running = false;
-    if (_animId) { cancelAnimationFrame(_animId); _animId = null; }
+    if (_animId) {
+      cancelAnimationFrame(_animId);
+      _animId = null;
+    }
   }
 
 })();
+
+                       
