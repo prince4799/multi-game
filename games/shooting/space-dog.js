@@ -24,9 +24,9 @@
   let _fireBtn   = null;
   let _animId    = null;
   let _running   = false;
-  let _gameOverPending = false;   // FIX: prevents multiple gameOver calls
+  let _gameOverPending = false;
   let _resizeHandler = null;
-  let _loadingEl = null;          // FIX: loading overlay element
+  let _loadingEl = null;
 
   let keys     = {};
   let fireHeld = false;
@@ -86,7 +86,7 @@
   const SpaceDog = {
     start(container) {
       _buildDOM(container);
-      _showLoadingOverlay();   // FIX: show loading BEFORE assets load
+      _showLoadingOverlay();
       _loadAssets();
     },
     destroy() {
@@ -102,6 +102,7 @@
     },
     restart() {
       _hideLoadingOverlay();
+      _gameOverPending = false;   // ensure flag is cleared on manual restart
       _startGame();
     }
   };
@@ -124,10 +125,9 @@
   });
 
   // ----------------------------------------------------------------
-  //  LOADING OVERLAY  — FIX #3
+  //  LOADING OVERLAY
   // ----------------------------------------------------------------
   function _showLoadingOverlay() {
-    // Remove any existing one first
     _hideLoadingOverlay();
 
     _loadingEl = document.createElement('div');
@@ -159,7 +159,6 @@
         letter-spacing: 3px;
       ">SUPER SPACE DOG</div>
 
-      <!-- Spinner -->
       <div style="
         width: 48px; height: 48px;
         border: 4px solid rgba(0,255,255,0.15);
@@ -176,7 +175,6 @@
         font-family: 'Rajdhani', sans-serif;
       ">Loading assets...</div>
 
-      <!-- Progress bar -->
       <div style="
         width: clamp(160px, 40vw, 260px);
         height: 3px;
@@ -194,7 +192,6 @@
       </div>
     `;
 
-    // Inject keyframes if not already present
     if (!document.getElementById('ssd-keyframes')) {
       const kf = document.createElement('style');
       kf.id = 'ssd-keyframes';
@@ -222,7 +219,6 @@
 
   function _hideLoadingOverlay() {
     if (_loadingEl) {
-      // Fade out smoothly
       _loadingEl.style.transition = 'opacity 0.4s ease';
       _loadingEl.style.opacity    = '0';
       setTimeout(() => {
@@ -246,7 +242,6 @@
       height:     '100%'
     });
 
-    // Main canvas
     _canvas = document.createElement('canvas');
     Object.assign(_canvas.style, {
       position: 'absolute', top: '0', left: '0',
@@ -255,7 +250,6 @@
     container.appendChild(_canvas);
     _ctx = _canvas.getContext('2d');
 
-    // Joystick canvas
     _joyCanvas = document.createElement('canvas');
     Object.assign(_joyCanvas.style, {
       position:    'absolute', top: '0', left: '0',
@@ -271,7 +265,6 @@
       _joyCanvas.style.display = 'block';
     }
 
-    // Fire button
     _fireBtn = document.createElement('button');
     _fireBtn.innerHTML = '🔫<br><span style="font-size:11px;font-weight:700;letter-spacing:1px">FIRE</span>';
     Object.assign(_fireBtn.style, {
@@ -295,7 +288,6 @@
       _fireBtn.style.display = 'flex';
     }
 
-    // HUD
     const hud = document.createElement('div');
     hud.id = 'ssd-hud';
     Object.assign(hud.style, {
@@ -338,7 +330,7 @@
   }
 
   // ----------------------------------------------------------------
-  //  ASSET LOADING  — FIX #3: tracks progress + shows overlay
+  //  ASSET LOADING
   // ----------------------------------------------------------------
   function _loadAssets() {
     dogImg       = new Image();
@@ -348,11 +340,11 @@
     heartImg     = new Image();
 
     const assets = [
-      { img: dogImg,       src: 'games/assets/dog.gif'         },
-      { img: cometImg,     src: 'games/assets/comet.png'       },
-      { img: explosionImg, src: 'games/assets/explosion.png'   },
+      { img: dogImg,       src: 'games/assets/dog.gif'           },
+      { img: cometImg,     src: 'games/assets/comet.png'         },
+      { img: explosionImg, src: 'games/assets/explosion.png'     },
       { img: crystalImg,   src: 'games/assets/dodge-crystal.jpg' },
-      { img: heartImg,     src: 'games/assets/heart.png'       }
+      { img: heartImg,     src: 'games/assets/heart.png'         }
     ];
 
     const total  = assets.length;
@@ -362,7 +354,6 @@
       loaded++;
       _updateLoadingProgress(loaded, total);
       if (loaded >= total) {
-        // Small delay so progress bar hits 100% visibly
         setTimeout(() => {
           _hideLoadingOverlay();
           _startGame();
@@ -372,9 +363,8 @@
 
     assets.forEach(({ img, src }) => {
       img.onload  = onDone;
-      img.onerror = onDone;  // graceful — fallback drawing used
+      img.onerror = onDone;
       img.src     = src;
-      // If somehow already cached and complete
       if (img.complete) onDone();
     });
   }
@@ -667,7 +657,7 @@
       _ctx.save();
       _ctx.globalAlpha = Math.max(0, alpha);
       if (imgOk(explosionImg)) {
-                _ctx.drawImage(explosionImg, e.x - s / 2, e.y - s / 2, s, s);
+        _ctx.drawImage(explosionImg, e.x - s / 2, e.y - s / 2, s, s);
       } else {
         const g = _ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, s / 2);
         g.addColorStop(0, 'rgba(255,200,50,0.9)');
@@ -721,7 +711,6 @@
         _ctx.lineWidth = 1.5; _ctx.stroke();
       }
 
-      // Glow outline regardless of image
       _ctx.shadowColor = '#00ffff'; _ctx.shadowBlur = 12;
       _ctx.strokeStyle = 'rgba(0,255,255,0.3)'; _ctx.lineWidth = 1; _ctx.stroke();
       _ctx.shadowBlur = 0;
@@ -766,11 +755,9 @@
   }
 
   // ----------------------------------------------------------------
-  //  BONUS HEARTS  — FIX #2: correct MAX_LIVES logic
+  //  BONUS HEARTS
   // ----------------------------------------------------------------
   function _spawnHeart() {
-    // Only spawn heart if player CAN benefit (below max)
-    // Still spawn for score bonus opportunity if at max
     hearts.push({
       x: W() + 30, y: 30 + Math.random() * (H() - 60),
       size: 25, speed: 1.8 + Math.random() * 1.5,
@@ -796,17 +783,14 @@
       _ctx.translate(h.x, h.y + bobOffset);
 
       if (imgOk(heartImg)) {
-        // Draw image centered
         _ctx.drawImage(heartImg, -s, -s, s * 2, s * 2);
       } else {
-        // Emoji fallback
         _ctx.font = `${s * 1.5}px serif`;
         _ctx.textAlign    = 'center';
         _ctx.textBaseline = 'middle';
         _ctx.fillText('❤️', 0, 0);
       }
 
-      // Pulsing glow ring
       _ctx.shadowColor  = '#ff0066';
       _ctx.shadowBlur   = 15 + 8 * Math.sin(h.pulse);
       _ctx.globalAlpha  = 0.25;
@@ -817,7 +801,6 @@
       _ctx.globalAlpha = 1;
       _ctx.shadowBlur  = 0;
 
-      // Label: show what collecting gives
       const atMax = game.lives >= MAX_LIVES;
       _ctx.font      = 'bold 10px sans-serif';
       _ctx.fillStyle = atMax ? '#ffd700' : '#ff88aa';
@@ -889,7 +872,7 @@
   }
 
   // ----------------------------------------------------------------
-  //  HUD  — FIX #2: renders correct number of hearts up to MAX_LIVES
+  //  HUD
   // ----------------------------------------------------------------
   function _updateHUD() {
     const scoreEl = document.getElementById('ssd-score');
@@ -901,12 +884,12 @@
       if (game.lives <= 0) {
         livesEl.textContent = '💀';
       } else {
-        // Cap display at MAX_LIVES so it never overflows UI
         const display = Math.min(game.lives, MAX_LIVES);
         livesEl.textContent = '❤️'.repeat(display);
       }
     }
 
+    // Update platform score displays if present
     const gs = document.getElementById('game-score-display');
     const gb = document.getElementById('game-best-display');
     if (gs) gs.textContent = game.score;
@@ -919,15 +902,14 @@
   function _startGame() {
     _stopLoop();
 
-    // Reset all state cleanly
     game.running         = true;
     game.score           = 0;
-    game.lives           = START_LIVES;   // always start with START_LIVES
+    game.lives           = START_LIVES;
     game.difficulty      = 1;
     game.time            = 0;
     game.shakeTimer      = 0;
     game.shakeIntensity  = 0;
-    _gameOverPending     = false;         // FIX #1: reset flag
+    _gameOverPending     = false;
 
     lasers     = [];
     comets     = [];
@@ -947,9 +929,11 @@
     _startLoop();
   }
 
-  // FIX #1: _gameOver — called only once, stops loop properly
+  // ----------------------------------------------------------------
+  //  GAME OVER  — fixed: uses App.showGameResult like math-speed.js
+  // ----------------------------------------------------------------
   function _gameOver() {
-    if (_gameOverPending) return;   // already triggered — ignore
+    if (_gameOverPending) return;
     _gameOverPending = true;
     game.running     = false;
 
@@ -961,26 +945,20 @@
 
     _updateHUD();
 
-    // Let final explosion particles finish rendering (~800ms)
-    // then stop loop and show result screen
+    // Let final explosion particles finish (~850ms), then show result screen
     setTimeout(() => {
-      _stopLoop();                  // FIX #1: stop loop HERE not before
+      _stopLoop();
 
-      if (window.GameRegistry && window.GameRegistry.onGameOver) {
-        window.GameRegistry.onGameOver({
-          score:     game.score,
-          highScore: game.highScore,
-          emoji:     '🐕',
-          heading:   'Game Over!'
-        });
-      }
+      // ✅ Correct platform API — matches math-speed.js pattern
+      const passed = game.score > 0;
+      App.showGameResult(game.score, passed);
+
     }, 850);
   }
 
-  // FIX #1: _hitPlayer — game.running = false prevents further updates
   function _hitPlayer() {
     if (player.invincible > 0) return;
-    if (_gameOverPending)       return; // FIX #1: already dying
+    if (_gameOverPending)       return;
 
     game.lives--;
     game.shakeTimer     = 18;
@@ -992,7 +970,6 @@
     _updateHUD();
 
     if (game.lives <= 0) {
-      // FIX #1: set running false immediately so no more hits register
       game.running = false;
       _spawnExplosion(player.x, player.y, 150);
       _spawnParticles(player.x, player.y, '#ff8800', 30, 6);
@@ -1014,7 +991,6 @@
     const alpha = joystick.opacity;
     _jctx.save();
 
-    // Base ring
     _jctx.globalAlpha = alpha * 0.25;
     _jctx.beginPath();
     _jctx.arc(joystick.baseX, joystick.baseY, joystick.baseRadius, 0, Math.PI * 2);
@@ -1022,7 +998,6 @@
     _jctx.globalAlpha = alpha * 0.4;
     _jctx.strokeStyle = '#00ccff'; _jctx.lineWidth = 2.5; _jctx.stroke();
 
-    // Stick
     const sx = joystick.active ? joystick.stickX : joystick.baseX;
     const sy = joystick.active ? joystick.stickY : joystick.baseY;
     _jctx.globalAlpha = alpha * 0.7;
@@ -1038,11 +1013,9 @@
   }
 
   // ----------------------------------------------------------------
-  //  UPDATE  — FIX #1: checks game.running at top
+  //  UPDATE
   // ----------------------------------------------------------------
   function _update() {
-    // FIX #1: if not running just update visuals (explosions/particles)
-    // so final death animation plays, but no gameplay logic runs
     if (!game.running) {
       _updateExplosions();
       _updateParticles();
@@ -1053,7 +1026,6 @@
     game.time++;
     game.difficulty = 1 + game.time / 2200;
 
-    // Movement
     let dx = 0, dy = 0;
     if (keys['ArrowUp']    || keys['KeyW']) dy -= 1;
     if (keys['ArrowDown']  || keys['KeyS']) dy += 1;
@@ -1081,7 +1053,6 @@
     if (player.invincible   > 0) player.invincible--;
     player.animFrame++;
 
-    // Spawn timers
     if (--timers.comet <= 0) {
       _spawnComet();
       timers.comet = Math.max(15, 55 - game.difficulty * 5) + Math.random() * 22;
@@ -1102,8 +1073,6 @@
     _updateStars(); _updateLasers(); _updateComets();
     _updateCrystals(); _updateBonusStars(); _updateHearts();
     _updateExplosions(); _updateParticles();
-
-    // ---- COLLISIONS ----
 
     // Laser vs comet
     for (let li = lasers.length - 1; li >= 0; li--) {
@@ -1166,19 +1135,16 @@
       }
     }
 
-    // Player vs heart  — FIX #2: clean MAX_LIVES logic
+    // Player vs heart
     for (let i = hearts.length - 1; i >= 0; i--) {
       const h = hearts[i];
       if (_circles(player.x, player.y, pHitR + 15, h.x, h.y, h.size * 0.6)) {
         hearts.splice(i, 1);
-
         if (game.lives < MAX_LIVES) {
-          // Give a life
           game.lives++;
           _spawnParticles(h.x, h.y, '#ff0066', 15, 4);
           _spawnScorePopup(h.x, h.y - 25, '+1 LIFE ❤️');
         } else {
-          // Already at max — give points instead
           game.score += 100;
           _spawnParticles(h.x, h.y, '#ffd700', 15, 4);
           _spawnScorePopup(h.x, h.y - 25, '+100 ⭐');
@@ -1198,7 +1164,6 @@
 
     _ctx.clearRect(0, 0, W(), H());
 
-    // Background
     const bg = _ctx.createLinearGradient(0, 0, W(), H());
     bg.addColorStop(0, '#050520');
     bg.addColorStop(0.5, '#0a0a35');
@@ -1206,7 +1171,6 @@
     _ctx.fillStyle = bg;
     _ctx.fillRect(0, 0, W(), H());
 
-    // Screen shake
     const shaking = game.shakeTimer > 0;
     if (shaking) {
       const intensity = (game.shakeTimer / 18) * game.shakeIntensity;
@@ -1224,13 +1188,11 @@
     _drawComets();
     _drawCrystals();
 
-    // FIX #1: draw player during invincible death flash, hide after confirmed dead
     if (game.lives > 0 || player.invincible > 0) _drawPlayer();
 
     _drawExplosions();
     _drawParticles();
 
-    // Crystal danger warning
     if (game.running) {
       crystals.forEach(c => {
         const dist = Math.hypot(c.x - player.x, c.y - player.y);
@@ -1253,12 +1215,12 @@
   }
 
   // ----------------------------------------------------------------
-  //  LOOP  — FIX #1: loop keeps running for death animation
+  //  LOOP
   // ----------------------------------------------------------------
   function _startLoop() {
     _running = true;
     const loop = () => {
-      if (!_running) return;   // only _stopLoop() kills the RAF
+      if (!_running) return;
       _update();
       _draw();
       _animId = requestAnimationFrame(loop);
@@ -1275,5 +1237,3 @@
   }
 
 })();
-
-                       
