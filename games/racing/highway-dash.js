@@ -27,8 +27,9 @@
   let _gameOverPending = false;
   let _resizeHandler   = null;
   let _loadingEl       = null;
+  let _padEl           = null;   // custom full-width gamepad overlay
 
-  // Held-key state — populated by ControlManager events
+  // Held-key state
   const _held = {};
 
   let playerCarImg = null;
@@ -117,7 +118,7 @@
     destroy() {
       _stopLoop();
       _detachControls();
-      ControlManager.hideTouchControls();
+      _removeCustomPad();
       if (_resizeHandler) {
         window.removeEventListener('resize', _resizeHandler);
         _resizeHandler = null;
@@ -147,7 +148,7 @@
     description: 'Weave through traffic on an endless highway. How far can you go?',
     emoji:       '🚗',
     difficulty:  'medium',
-    controls:    { dpad: true, actions: false, center: false },
+    controls:    { dpad: false, actions: false, center: false },
     version:     '1.2',
     init:        (container) => HighwayDash.start(container),
     destroy:     () => HighwayDash.destroy(),
@@ -198,8 +199,12 @@
       kf.textContent = `
         @keyframes hd-spin  { to { transform:rotate(360deg); } }
         @keyframes hd-float {
-          0%,100% { transform:translateY(0);    }
+          0%,100% { transform:translateY(0); }
           50%     { transform:translateY(-12px); }
+        }
+        @keyframes hd-btn-pulse {
+          0%,100% { box-shadow: inset 0 0 0 rgba(255,149,0,0); }
+          50%     { box-shadow: inset 0 0 30px rgba(255,149,0,0.18); }
         }`;
       document.head.appendChild(kf);
     }
@@ -240,12 +245,11 @@
       height:     '100%'
     });
 
-    // Main canvas
     _canvas = document.createElement('canvas');
     Object.assign(_canvas.style, {
       position: 'absolute', top: '0', left: '0',
-      width: '100%', height: '100%', zIndex: '1',
-      display: 'block'
+      width: '100%', height: '100%',
+      zIndex: '1', display: 'block'
     });
     container.appendChild(_canvas);
     _ctx = _canvas.getContext('2d');
@@ -318,6 +322,141 @@
   }
 
   // ----------------------------------------------------------------
+  //  CUSTOM FULL-WIDTH GAMEPAD  (mobile only)
+  //  Injected into #game-canvas-wrap's parent — same level as
+  //  #touch-controls — so it sits BELOW the canvas at full width.
+  //  We keep #touch-controls hidden and render our own pad instead.
+  // ----------------------------------------------------------------
+  function _buildCustomPad() {
+    // Only on touch devices
+    if (!ControlManager.isTouchDevice()) return;
+
+    // Hide the default touch-controls entirely for this game
+    ControlManager.hideTouchControls();
+
+    // Find the game-screen container to append our pad
+    const gameScreen = document.getElementById('game-screen');
+    if (!gameScreen) return;
+
+    _padEl = document.createElement('div');
+    _padEl.id = 'hd-custom-pad';
+    Object.assign(_padEl.style, {
+      position:        'absolute',
+      bottom:          '0',
+      left:            '0',
+      right:           '0',
+      height:          '22%',          // same visual weight as default touch-controls
+      minHeight:       '90px',
+      maxHeight:       '140px',
+      display:         'flex',
+      flexDirection:   'row',
+      zIndex:          '30',
+      background:      'linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 100%)',
+      padding:         '8px 10px 12px',
+      boxSizing:       'border-box',
+      gap:             '8px',
+      touchAction:     'none',
+      userSelect:      'none',
+      WebkitUserSelect:'none'
+    });
+
+    // LEFT button
+    const leftBtn = _makeSteerBtn('◀', 'LEFT', 'ArrowLeft', '#ff9500');
+    // RIGHT button
+    const rightBtn = _makeSteerBtn('▶', 'RIGHT', 'ArrowRight', '#ff9500');
+
+    _padEl.appendChild(leftBtn);
+    _padEl.appendChild(rightBtn);
+    gameScreen.appendChild(_padEl);
+  }
+
+  function _makeSteerBtn(icon, label, key, accentColor) {
+    const btn = document.createElement('button');
+    Object.assign(btn.style, {
+      flex:            '1',
+      height:          '100%',
+      background:      'rgba(255,255,255,0.07)',
+      border:          `2px solid rgba(255,149,0,0.3)`,
+      borderRadius:    '14px',
+      color:           '#fff',
+      display:         'flex',
+      flexDirection:   'column',
+      alignItems:      'center',
+      justifyContent:  'center',
+      gap:             '4px',
+      cursor:          'pointer',
+      touchAction:     'manipulation',
+      outline:         'none',
+      transition:      'background 0.08s, border-color 0.08s, transform 0.08s',
+      WebkitTapHighlightColor: 'transparent'
+    });
+
+    btn.innerHTML = `
+      <span style="font-size:clamp(28px,7vw,44px);line-height:1">${icon}</span>
+      <span style="font-family:'Orbitron',sans-serif;
+        font-size:clamp(9px,2.2vw,13px);font-weight:700;
+        letter-spacing:2px;opacity:0.7">${label}</span>`;
+
+    // Active visual state
+    const setActive = (on) => {
+      btn.style.background   = on
+        ? `rgba(255,149,0,0.22)`
+        : 'rgba(255,255,255,0.07)';
+      btn.style.borderColor  = on
+        ? `rgba(255,149,0,0.9)`
+        : 'rgba(255,149,0,0.3)';
+      btn.style.transform    = on ? 'scale(0.96)' : 'scale(1)';
+      btn.style.boxShadow    = on
+        ? `inset 0 0 24px rgba(255,149,0,0.18), 0 0 16px rgba(255,149,0,0.15)`
+        : 'none';
+    };
+
+    // Touch events — fire ControlManager events so _held state updates
+    btn.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      if (!game.running) return;
+      setActive(true);
+      _held[key] = true;
+    }, { passive: false });
+
+    btn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      setActive(false);
+      _held[key] = false;
+    }, { passive: false });
+
+    btn.addEventListener('touchcancel', (e) => {
+      e.preventDefault();
+      setActive(false);
+      _held[key] = false;
+    }, { passive: false });
+
+    // Mouse fallback (desktop testing)
+    btn.addEventListener('mousedown', (e) => {
+      if (!game.running) return;
+      setActive(true);
+      _held[key] = true;
+    });
+    btn.addEventListener('mouseup', () => {
+      setActive(false);
+      _held[key] = false;
+    });
+    btn.addEventListener('mouseleave', () => {
+      setActive(false);
+      _held[key] = false;
+    });
+
+    return btn;
+  }
+
+  function _removeCustomPad() {
+    if (_padEl && _padEl.parentNode) {
+      _padEl.parentNode.removeChild(_padEl);
+    }
+    _padEl = null;
+  }
+
+  // ----------------------------------------------------------------
   //  RESIZE
   // ----------------------------------------------------------------
   function _resize() {
@@ -333,7 +472,7 @@
   }
 
   // ----------------------------------------------------------------
-  //  ASSET LOADING
+  //  ASSET LOADING  — updated asset names
   // ----------------------------------------------------------------
   function _loadAssets() {
     playerCarImg = new Image();
@@ -343,9 +482,9 @@
     coinImg      = new Image();
 
     const assets = [
-      { img: playerCarImg, src: 'games/assets/player-car.png'  },
-      { img: enemyCar1Img, src: 'games/assets/enemy-car-1.png' },
-      { img: enemyCar2Img, src: 'games/assets/enemy-car-2.png' },
+      { img: playerCarImg, src: 'games/assets/player-car.png'   },
+      { img: enemyCar1Img, src: 'games/assets/enemy-car-1.png'    },
+      { img: enemyCar2Img, src: 'games/assets/enemy-car-2.png'    },
       { img: explosionImg, src: 'games/assets/explosion.png'   },
       { img: coinImg,      src: 'games/assets/coin.png'        }
     ];
@@ -359,7 +498,7 @@
         setTimeout(() => {
           _hideLoadingOverlay();
           _attachControls();
-          _setupTouchControls();
+          _buildCustomPad();
           _startGame();
         }, 300);
       }
@@ -376,19 +515,6 @@
   // ----------------------------------------------------------------
   //  CONTROL MANAGER INTEGRATION
   // ----------------------------------------------------------------
-  /*
-    Key mapping:
-    ─────────────────────────────────────────────────
-    Desktop keyboard (via ControlManager initKeyboard):
-      ArrowLeft  / KeyA  → move left
-      ArrowRight / KeyD  → move right
-
-    Mobile d-pad (your existing HTML buttons):
-      dpad-left  data-key="ArrowLeft"  → move left
-      dpad-right data-key="ArrowRight" → move right
-      dpad-up / dpad-down              → hidden (not needed)
-    ─────────────────────────────────────────────────
-  */
   function _attachControls() {
     ControlManager.on('keydown', 'highway-dash', (key) => {
       _held[key] = true;
@@ -403,66 +529,6 @@
     ControlManager.off('keyup',   'highway-dash');
     ControlManager.clearKeys();
     Object.keys(_held).forEach(k => { _held[k] = false; });
-  }
-
-  // ----------------------------------------------------------------
-  //  TOUCH CONTROLS SETUP
-  // ----------------------------------------------------------------
-  function _setupTouchControls() {
-    /*
-      Highway Dash only needs left / right — we show the dpad but
-      hide the up/down buttons so the layout stays clean.
-      Action buttons are hidden entirely.
-    */
-    ControlManager.showTouchControls({
-      dpad:    true,
-      actions: false,
-      center:  false
-    });
-    _relabelDpad();
-    _hideDpadVertical();
-  }
-
-  function _relabelDpad() {
-    // Relabel left/right with context-appropriate icons
-    const map = {
-      'ArrowLeft':  { icon: '◀', sub: 'Left'  },
-      'ArrowRight': { icon: '▶', sub: 'Right' }
-    };
-    Object.entries(map).forEach(([key, { icon, sub }]) => {
-      document.querySelectorAll(`.dpad-btn[data-key="${key}"]`).forEach(btn => {
-        btn.innerHTML = `
-          <span style="display:block;font-size:1.2em;line-height:1">${icon}</span>
-          <span style="display:block;font-size:clamp(7px,1.5vw,9px);
-            opacity:0.55;font-family:'Rajdhani',sans-serif">${sub}</span>`;
-      });
-    });
-  }
-
-  function _hideDpadVertical() {
-    // Hide up/down dpad buttons — not used in this game
-    ['dpad-up', 'dpad-down'].forEach(id => {
-      const btn = document.getElementById(id);
-      if (btn) btn.style.visibility = 'hidden';
-    });
-  }
-
-  function _restoreButtonLabels() {
-    // Restore original FA icons from index.html
-    const orig = {
-      'ArrowLeft':  '<i class="fas fa-chevron-left"></i>',
-      'ArrowRight': '<i class="fas fa-chevron-right"></i>'
-    };
-    Object.entries(orig).forEach(([key, html]) => {
-      document.querySelectorAll(`.dpad-btn[data-key="${key}"]`).forEach(btn => {
-        btn.innerHTML = html;
-      });
-    });
-    // Restore up/down visibility
-    ['dpad-up', 'dpad-down'].forEach(id => {
-      const btn = document.getElementById(id);
-      if (btn) btn.style.visibility = '';
-    });
   }
 
   // ----------------------------------------------------------------
@@ -503,8 +569,8 @@
     ctx.globalAlpha = 0.15;
     ctx.fillStyle   = '#2d5a2d';
     for (let gy = 0; gy < H(); gy += 24) {
-      ctx.fillRect(0,       gy, rx,             12);
-      ctx.fillRect(rx + rw, gy, W()-(rx+rw),    12);
+      ctx.fillRect(0,       gy, rx,          12);
+      ctx.fillRect(rx + rw, gy, W()-(rx+rw), 12);
     }
     ctx.restore();
 
@@ -560,9 +626,9 @@
       ctx.save();
       ctx.globalAlpha = sr * 0.1;
       const sh = ctx.createLinearGradient(rx, 0, rx + rw, 0);
-      sh.addColorStop(0, 'transparent');
+      sh.addColorStop(0,   'transparent');
       sh.addColorStop(0.5, '#ff9500');
-      sh.addColorStop(1, 'transparent');
+      sh.addColorStop(1,   'transparent');
       ctx.fillStyle = sh;
       ctx.fillRect(rx, 0, rw, H());
       ctx.restore();
@@ -582,7 +648,6 @@
   }
 
   function _updatePlayer() {
-    // Read from _held — works for both keyboard and dpad touch
     let inputDx = 0;
     if (_held['ArrowLeft']  || _held['KeyA']) inputDx = -1;
     if (_held['ArrowRight'] || _held['KeyD']) inputDx =  1;
@@ -590,14 +655,11 @@
     const moveSpd = road.laneWidth * 0.14;
     player.x += inputDx * moveSpd;
 
-    // Clamp inside road shoulders
     const minX = road.x + player.w / 2 + road.width * 0.025;
     const maxX = road.x + road.width - player.w / 2 - road.width * 0.025;
     player.x   = Math.max(minX, Math.min(maxX, player.x));
 
-    // Tilt
     player.tilt += (inputDx * 0.15 - player.tilt) * 0.14;
-
     if (player.invincible > 0) player.invincible--;
   }
 
@@ -620,7 +682,7 @@
       _drawCarFallback(ctx, 0, 0, pw, ph, '#1a9fff', '#0066cc', true);
     }
 
-    // Exhaust at high speed
+    // Exhaust
     const sr = Math.min(1, (game.speed - BASE_SPEED) / (MAX_SPEED - BASE_SPEED));
     if (sr > 0.25 && Math.random() > 0.45) {
       ctx.globalAlpha *= 0.5 * sr;
@@ -652,7 +714,8 @@
 
     ctx.fillStyle = bodyCol;
     ctx.beginPath();
-    ctx.roundRect(cx - w/2, cy - h/2, w, h, [w*0.22, w*0.22, w*0.14, w*0.14]);
+    ctx.roundRect(cx - w/2, cy - h/2, w, h,
+      [w*0.22, w*0.22, w*0.14, w*0.14]);
     ctx.fill();
 
     ctx.fillStyle = darkCol;
@@ -660,12 +723,16 @@
     ctx.roundRect(cx - w*0.38, cy - h*0.28, w*0.76, h*0.34, 5);
     ctx.fill();
 
-    ctx.fillStyle = isPlayer ? 'rgba(160,220,255,0.75)' : 'rgba(255,140,140,0.75)';
+    ctx.fillStyle = isPlayer
+      ? 'rgba(160,220,255,0.75)'
+      : 'rgba(255,140,140,0.75)';
     ctx.beginPath();
     ctx.roundRect(cx - w*0.30, cy - h*0.26, w*0.60, h*0.18, 4);
     ctx.fill();
 
-    ctx.fillStyle = isPlayer ? 'rgba(120,190,230,0.55)' : 'rgba(220,110,110,0.55)';
+    ctx.fillStyle = isPlayer
+      ? 'rgba(120,190,230,0.55)'
+      : 'rgba(220,110,110,0.55)';
     ctx.beginPath();
     ctx.roundRect(cx - w*0.26, cy + h*0.06, w*0.52, h*0.14, 4);
     ctx.fill();
@@ -675,8 +742,8 @@
     ctx.shadowColor = hlCol;
     ctx.shadowBlur  = 8;
     const hlY = cy - h*0.43, hlOX = w*0.27, hlW = w*0.13, hlH = h*0.05;
-    ctx.beginPath(); ctx.ellipse(cx - hlOX, hlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(cx + hlOX, hlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx-hlOX, hlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx+hlOX, hlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
 
     const tlCol = isPlayer ? '#ff2222' : '#ffffff';
@@ -684,8 +751,8 @@
     ctx.shadowColor = tlCol;
     ctx.shadowBlur  = 6;
     const tlY = cy + h*0.43;
-    ctx.beginPath(); ctx.ellipse(cx - hlOX, tlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.ellipse(cx + hlOX, tlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx-hlOX, tlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx+hlOX, tlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
 
     const wy = h*0.34, wx = w*0.50, wrx = w*0.13, wry = h*0.09;
@@ -716,10 +783,11 @@
     const ew        = isTruck ? truckW() : carW();
     const eh        = isTruck ? truckH() : carH();
     enemies.push({
-      x: laneX(lane), y: -eh - 20, w: ew, h: eh, lane,
-      speed:   game.speed * (0.28 + Math.random() * 0.32),
-      color:   colorPair[0], dark: colorPair[1], isTruck,
-      img:     isTruck ? enemyCar2Img : enemyCar1Img
+      x:     laneX(lane), y: -eh - 20,
+      w:     ew, h: eh, lane,
+      speed: game.speed * (0.28 + Math.random() * 0.32),
+      color: colorPair[0], dark: colorPair[1],
+      isTruck, img: isTruck ? enemyCar2Img : enemyCar1Img
     });
   }
 
@@ -748,9 +816,10 @@
   function _spawnCoin() {
     const r = Math.max(10, road.laneWidth * 0.18);
     coins.push({
-      x: laneX(randInt(0, LANE_COUNT-1)), y: -r - 10, r,
-      speed: game.speed * 0.52, angle: 0,
-      glow: Math.random() * Math.PI * 2
+      x:     laneX(randInt(0, LANE_COUNT - 1)), y: -r - 10, r,
+      speed: game.speed * 0.52,
+      angle: 0,
+      glow:  Math.random() * Math.PI * 2
     });
   }
 
@@ -772,13 +841,16 @@
         _ctx.drawImage(coinImg, -s/2, -s/2, s, s);
       } else {
         const g = _ctx.createRadialGradient(-c.r*0.2, -c.r*0.2, 1, 0, 0, c.r);
-        g.addColorStop(0, '#ffe566'); g.addColorStop(0.7, '#ffd700'); g.addColorStop(1, '#b8860b');
+        g.addColorStop(0, '#ffe566');
+        g.addColorStop(0.7, '#ffd700');
+        g.addColorStop(1, '#b8860b');
         _ctx.beginPath(); _ctx.arc(0, 0, c.r, 0, Math.PI*2);
         _ctx.fillStyle = g; _ctx.fill();
         _ctx.shadowBlur   = 0;
         _ctx.fillStyle    = 'rgba(120,80,0,0.8)';
         _ctx.font         = `bold ${Math.round(c.r*1.1)}px sans-serif`;
-        _ctx.textAlign    = 'center'; _ctx.textBaseline = 'middle';
+        _ctx.textAlign    = 'center';
+        _ctx.textBaseline = 'middle';
         _ctx.fillText('$', 0, 1);
       }
       _ctx.shadowBlur = 0;
@@ -958,7 +1030,6 @@
     timers     = { enemy: 60, coin: 140 };
     _milestones.clear();
 
-    // Clear all held keys
     Object.keys(_held).forEach(k => { _held[k] = false; });
 
     _initRoadLines();
@@ -1032,7 +1103,8 @@
       const x   = road.x + Math.random() * road.width;
       const y   = Math.random() * H();
       const len = 18 + sr * 55;
-      _ctx.beginPath(); _ctx.moveTo(x, y); _ctx.lineTo(x, y + len); _ctx.stroke();
+      _ctx.beginPath();
+      _ctx.moveTo(x, y); _ctx.lineTo(x, y + len); _ctx.stroke();
     }
     _ctx.restore();
   }
@@ -1053,7 +1125,7 @@
   }
 
   // ----------------------------------------------------------------
-  //  DESKTOP KEY HINTS (drawn on canvas)
+  //  DESKTOP KEY HINTS
   // ----------------------------------------------------------------
   function _drawKeyHints() {
     if (ControlManager.isTouchDevice()) return;
@@ -1078,16 +1150,11 @@
     }
 
     game.time++;
-
-    // Speed ramp
     game.speed = Math.min(MAX_SPEED, BASE_SPEED + game.time * SPEED_INCREMENT);
     road.speed = game.speed;
-
-    // Distance
     game.distance += game.speed * 0.04;
     _checkMilestone();
 
-    // Spawn timers
     if (--timers.enemy <= 0) {
       _spawnEnemy();
       timers.enemy = Math.max(30, 78 - game.time * 0.012) + randInt(0, 18);
