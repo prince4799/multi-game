@@ -1,7 +1,7 @@
 /* ================================================
    TETRIS v1.0
-   Classic tetris with modern visuals, hold piece,
-   ghost piece, levels, combos, in-canvas game-over
+   Classic tetris — ghost piece, levels, combos,
+   in-canvas game-over overlay
    Category: Puzzle
    ================================================ */
 
@@ -17,23 +17,12 @@
   const TOTAL_ROWS  = ROWS + HIDDEN_ROWS;
 
   const COLORS = {
-    I: '#00f0f0',
-    O: '#f0f000',
-    T: '#a000f0',
-    S: '#00f000',
-    Z: '#f00000',
-    J: '#0000f0',
-    L: '#f0a000'
+    I: '#00f0f0', O: '#f0f000', T: '#a000f0',
+    S: '#00f000', Z: '#f00000', J: '#0000f0', L: '#f0a000'
   };
-
   const SHADOW = {
-    I: '#00a0a0',
-    O: '#a0a000',
-    T: '#6800a0',
-    S: '#008000',
-    Z: '#a00000',
-    J: '#000080',
-    L: '#a06800'
+    I: '#00a0a0', O: '#a0a000', T: '#6800a0',
+    S: '#008000', Z: '#a00000', J: '#000080', L: '#a06800'
   };
 
   const SHAPES = {
@@ -82,28 +71,20 @@
   };
 
   const KICKS = {
-    '0>1': [[-1,0],[-1,1],[0,-2],[-1,-2]],
-    '1>0': [[ 1,0],[ 1,-1],[0,2],[1,2]],
-    '1>2': [[ 1,0],[ 1,-1],[0,2],[1,2]],
-    '2>1': [[-1,0],[-1,1],[0,-2],[-1,-2]],
-    '2>3': [[ 1,0],[ 1,1],[0,-2],[1,-2]],
-    '3>2': [[-1,0],[-1,-1],[0,2],[-1,2]],
-    '3>0': [[-1,0],[-1,-1],[0,2],[-1,2]],
-    '0>3': [[ 1,0],[ 1,1],[0,-2],[1,-2]]
+    '0>1':[[-1,0],[-1,1],[0,-2],[-1,-2]], '1>0':[[1,0],[1,-1],[0,2],[1,2]],
+    '1>2':[[1,0],[1,-1],[0,2],[1,2]],     '2>1':[[-1,0],[-1,1],[0,-2],[-1,-2]],
+    '2>3':[[1,0],[1,1],[0,-2],[1,-2]],    '3>2':[[-1,0],[-1,-1],[0,2],[-1,2]],
+    '3>0':[[-1,0],[-1,-1],[0,2],[-1,2]], '0>3':[[1,0],[1,1],[0,-2],[1,-2]]
   };
   const KICKS_I = {
-    '0>1': [[-2,0],[1,0],[-2,-1],[1,2]],
-    '1>0': [[ 2,0],[-1,0],[2,1],[-1,-2]],
-    '1>2': [[-1,0],[2,0],[-1,2],[2,-1]],
-    '2>1': [[ 1,0],[-2,0],[1,-2],[-2,1]],
-    '2>3': [[ 2,0],[-1,0],[2,1],[-1,-2]],
-    '3>2': [[-2,0],[1,0],[-2,-1],[1,2]],
-    '3>0': [[ 1,0],[-2,0],[1,-2],[-2,1]],
-    '0>3': [[-1,0],[2,0],[-1,2],[2,-1]]
+    '0>1':[[-2,0],[1,0],[-2,-1],[1,2]],  '1>0':[[2,0],[-1,0],[2,1],[-1,-2]],
+    '1>2':[[-1,0],[2,0],[-1,2],[2,-1]],  '2>1':[[1,0],[-2,0],[1,-2],[-2,1]],
+    '2>3':[[2,0],[-1,0],[2,1],[-1,-2]],  '3>2':[[-2,0],[1,0],[-2,-1],[1,2]],
+    '3>0':[[1,0],[-2,0],[1,-2],[-2,1]],  '0>3':[[-1,0],[2,0],[-1,2],[2,-1]]
   };
 
-  const POINTS     = [0, 100, 300, 500, 800];
-  const LEVEL_UP   = 10;
+  const POINTS   = [0,100,300,500,800];
+  const LEVEL_UP = 10;
   const LOCK_DELAY = 30;
   const DAS_DELAY  = 10;
   const DAS_SPEED  = 2;
@@ -117,47 +98,32 @@
   let _running       = false;
   let _overlayEl     = null;
   let _loadingEl     = null;
-  let _hudEl         = null;
-  let _padEl         = null;   // mobile gamepad element
   let _resizeHandler = null;
-  let _isMobile      = false;
 
   let _lastTime  = 0;
   let _dropAccum = 0;
 
-  // Keyboard state
-  const _keys     = {};
-  const _dasState = { left: 0, right: 0 };
-
-  let _bKeyDown = null;
-  let _bKeyUp   = null;
-
-  // Gamepad button pressed state (for repeat)
-  const _padHeld    = {};
-  const _padDas     = { left: 0, right: 0, down: 0 };
+  // Held-key state  (populated via ControlManager keydown/keyup)
+  const _held     = {};
+  const _dasLeft  = { n: 0 };
+  const _dasRight = { n: 0 };
+  const _dasSoft  = { n: 0 };
 
   const game = {
-    running:   false,
-    over:      false,
-    score:     0,
-    lines:     0,
-    level:     1,
-    combo:     0,
+    running:   false, over:      false,
+    score:     0,     lines:     0,
+    level:     1,     combo:     0,
     highScore: parseInt(localStorage.getItem('tet_hi') || '0'),
     time:      0
   };
 
-  let board      = [];
-  let piece      = null;
-  let nextQueue  = [];
-  let holdPiece  = null;
-  let holdUsed   = false;
-
-  let lockTimer  = 0;
-  let lockReset  = 0;
-
-  let particles  = [];
-  let lineFlash  = [];
+  let board     = [];
+  let piece     = null;
+  let nextPiece = null;   // single look-ahead (shown on desktop panel only)
+  let lockTimer = 0;
+  let lockReset = 0;
+  let particles = [];
+  let lineFlash = [];
 
   // ================================================================
   //  HELPERS
@@ -165,27 +131,30 @@
   function W()      { return _canvas ? _canvas.width  : window.innerWidth;  }
   function H()      { return _canvas ? _canvas.height : window.innerHeight; }
   function rnd(a,b) { return Math.random()*(b-a)+a; }
-
-  function _isMobileDevice() {
-    return window.matchMedia('(pointer: coarse)').matches;
-  }
+  function _touch() { return ControlManager.isTouchDevice(); }
 
   function _cellSize() {
-    const padH  = _isMobile ? H() * 0.28 : 0;   // reserve space for pad
-    const availH = (H() - padH) * 0.92;
-    const maxH  = availH / ROWS;
-    const maxW  = (W() * 0.54) / COLS;
-    return Math.floor(Math.min(maxH, maxW, 34));
+    const maxH = (H() * 0.93) / ROWS;
+    // On desktop we need room for the side panels (~4 cells each side + gap)
+    const sideRoom = _touch() ? 0 : cs => cs * 4 + 28;
+    // Iterate once to find best fit
+    let cs = Math.floor(Math.min(maxH, (W() * 0.56) / COLS, 34));
+    if (!_touch()) {
+      // Ensure board + two panels fit horizontally
+      while (cs > 10 && cs * COLS + (cs * 4 + 28) * 2 > W() * 0.98) cs--;
+    }
+    return cs;
   }
 
   function _boardOrigin() {
-    const cs  = _cellSize();
-    const bw  = cs * COLS;
-    const bh  = cs * ROWS;
-    const padH = _isMobile ? H() * 0.28 : 0;
+    const cs = _cellSize();
+    const bw = cs * COLS;
+    const bh = cs * ROWS;
+    // Centre board; on desktop shift slightly left to balance with NEXT panel
+    const xOff = _touch() ? 0 : Math.floor(cs * 2);
     return {
-      x: Math.floor((W() - bw) / 2) - Math.floor(cs * 2),
-      y: Math.floor(((H() - padH) - bh) / 2)
+      x: Math.floor((W() - bw) / 2) - xOff,
+      y: Math.floor((H() - bh) / 2)
     };
   }
 
@@ -206,7 +175,7 @@
     }
   }
   function _nextFromBag() {
-    if (_bag.length === 0) _refillBag();
+    if (!_bag.length) _refillBag();
     return _bag.pop();
   }
 
@@ -215,19 +184,17 @@
   // ================================================================
   function _emptyBoard() {
     board = [];
-    for (let r = 0; r < TOTAL_ROWS; r++) {
-      board.push(new Array(COLS).fill(null));
-    }
+    for (let r = 0; r < TOTAL_ROWS; r++) board.push(new Array(COLS).fill(null));
   }
 
   // ================================================================
   //  PIECE
   // ================================================================
   function _makePiece(type) {
-    return { type, rot: 0, row: 0, col: Math.floor(COLS/2) - 2 };
+    return { type, rot: 0, row: 0, col: Math.floor(COLS / 2) - 2 };
   }
   function _cells(p) {
-    return SHAPES[p.type][p.rot].map(([r,c]) => [r+p.row, c+p.col]);
+    return SHAPES[p.type][p.rot].map(([r,c]) => [r + p.row, c + p.col]);
   }
   function _valid(p, dr=0, dc=0, rot=p.rot) {
     const t = { ...p, row: p.row+dr, col: p.col+dc, rot };
@@ -236,18 +203,15 @@
     );
   }
   function _ghostRow(p) {
-    let dr = 0;
-    while (_valid(p, dr+1)) dr++;
-    return p.row + dr;
+    let dr = 0; while (_valid(p, dr+1)) dr++; return p.row + dr;
   }
 
   // ================================================================
   //  SPAWN
   // ================================================================
   function _spawn() {
-    holdUsed = false;
-    piece = _makePiece(nextQueue.shift());
-    nextQueue.push(_nextFromBag());
+    piece     = _makePiece(nextPiece);
+    nextPiece = _nextFromBag();
     if (!_valid(piece)) _triggerGameOver();
     lockTimer = 0; lockReset = 0;
   }
@@ -257,18 +221,17 @@
   // ================================================================
   function _rotate(dir) {
     if (!piece) return;
-    const fromRot = piece.rot;
-    const toRot   = (fromRot + (dir > 0 ? 1 : 3)) % 4;
-    const key     = `${fromRot}>${toRot}`;
-    const kicks   = (piece.type === 'I' ? KICKS_I : KICKS)[key] || [];
+    const from  = piece.rot;
+    const to    = (from + (dir > 0 ? 1 : 3)) % 4;
+    const key   = `${from}>${to}`;
+    const kicks = (piece.type === 'I' ? KICKS_I : KICKS)[key] || [];
 
-    if (_valid(piece, 0, 0, toRot)) {
-      piece = { ...piece, rot: toRot };
-      _resetLock(); SoundManager.navigate(); return;
+    if (_valid(piece, 0, 0, to)) {
+      piece = { ...piece, rot: to }; _resetLock(); SoundManager.navigate(); return;
     }
     for (const [dc, dr] of kicks) {
-      if (_valid(piece, dr, dc, toRot)) {
-        piece = { ...piece, rot: toRot, row: piece.row+dr, col: piece.col+dc };
+      if (_valid(piece, dr, dc, to)) {
+        piece = { ...piece, rot: to, row: piece.row+dr, col: piece.col+dc };
         _resetLock(); SoundManager.navigate(); return;
       }
     }
@@ -291,27 +254,11 @@
   function _hardDrop() {
     if (!piece) return;
     const dr = _ghostRow(piece) - piece.row;
-    piece = { ...piece, row: piece.row+dr };
+    piece = { ...piece, row: piece.row + dr };
     game.score += dr * 2;
     SoundManager.correct(); _lock();
   }
-  function _resetLock() {
-    if (lockReset < 15) { lockTimer = 0; lockReset++; }
-  }
-
-  // ================================================================
-  //  HOLD
-  // ================================================================
-  function _hold() {
-    if (!piece || holdUsed) return;
-    const hType = holdPiece ? holdPiece.type : null;
-    holdPiece = { type: piece.type };
-    holdUsed  = true;
-    if (hType) { piece = _makePiece(hType); }
-    else       { _spawn(); return; }
-    lockTimer = 0; lockReset = 0;
-    SoundManager.navigate();
-  }
+  function _resetLock() { if (lockReset < 15) { lockTimer = 0; lockReset++; } }
 
   // ================================================================
   //  LOCK
@@ -319,9 +266,7 @@
   function _lock() {
     if (!piece) return;
     _cells(piece).forEach(([r,c]) => { if (r >= 0) board[r][c] = COLORS[piece.type]; });
-    SoundManager.click();
-    _clearLines();
-    _spawn();
+    SoundManager.click(); _clearLines(); _spawn();
   }
 
   // ================================================================
@@ -329,37 +274,31 @@
   // ================================================================
   function _clearLines() {
     const full = [];
-    for (let r = 0; r < TOTAL_ROWS; r++) {
-      if (board[r].every(c => c !== null)) full.push(r);
-    }
-    if (full.length === 0) { game.combo = 0; return; }
+    for (let r = 0; r < TOTAL_ROWS; r++) if (board[r].every(c => c !== null)) full.push(r);
+    if (!full.length) { game.combo = 0; return; }
 
     lineFlash = full.map(r => ({ row: r, timer: 18 }));
-
-    const n   = full.length;
-    const combo = ++game.combo;
-    let pts  = POINTS[n] * game.level;
-    if (combo > 1) pts += 50 * (combo-1) * game.level;
+    const n = full.length, combo = ++game.combo;
+    let pts = POINTS[n] * game.level;
+    if (combo > 1) pts += 50 * (combo - 1) * game.level;
     game.score += pts;
     game.lines += n;
 
-    const newLevel = Math.floor(game.lines / LEVEL_UP) + 1;
-    if (newLevel > game.level) {
-      game.level = newLevel;
+    const newLv = Math.floor(game.lines / LEVEL_UP) + 1;
+    if (newLv > game.level) {
+      game.level = newLv;
       App.showToast(`Level ${game.level}! 🚀`, 'success', 1500);
     }
 
     full.forEach(r => {
       for (let c = 0; c < COLS; c++) _spawnParticles(c, r, board[r][c] || '#fff', 4);
     });
-
     for (const r of full.sort((a,b) => b-a)) {
       board.splice(r, 1);
       board.unshift(new Array(COLS).fill(null));
     }
 
-    _updateHUD();
-    SoundManager.correct();
+    _updateHUD(); SoundManager.correct();
     if (n === 4) App.showToast('TETRIS! 🎉', 'success', 2000);
     else if (combo > 2) App.showToast(`${combo}x COMBO! 🔥`, 'info', 1500);
   }
@@ -368,24 +307,21 @@
   //  PARTICLES
   // ================================================================
   function _spawnParticles(gc, gr, color, count) {
-    const cs   = _cellSize();
-    const orig = _boardOrigin();
-    const px   = orig.x + gc*cs + cs/2;
-    const py   = orig.y + (gr - HIDDEN_ROWS)*cs + cs/2;
+    const cs = _cellSize(), orig = _boardOrigin();
+    const px = orig.x + gc*cs + cs/2;
+    const py = orig.y + (gr - HIDDEN_ROWS)*cs + cs/2;
     for (let i = 0; i < count; i++) {
       const a = rnd(0, Math.PI*2), s = rnd(1,4);
       particles.push({
-        x: px, y: py,
-        vx: Math.cos(a)*s, vy: Math.sin(a)*s,
-        life: rnd(20,45), maxLife: 45,
-        color, size: rnd(2,5)
+        x: px, y: py, vx: Math.cos(a)*s, vy: Math.sin(a)*s,
+        life: rnd(20,45), maxLife: 45, color, size: rnd(2,5)
       });
     }
-    if (particles.length > 400) particles.splice(0, particles.length-400);
+    if (particles.length > 400) particles.splice(0, particles.length - 400);
   }
 
   // ================================================================
-  //  GAME OVER
+  //  GAME OVER OVERLAY
   // ================================================================
   function _triggerGameOver() {
     game.over = true; game.running = false;
@@ -467,17 +403,16 @@
       </div>`;
 
     cont.appendChild(_overlayEl);
+
     const rb = _overlayEl.querySelector('#tet-btn-replay');
     const hb = _overlayEl.querySelector('#tet-btn-home');
     const onReplay = () => { SoundManager.click(); Tetris.restart(); };
     const onHome   = () => { SoundManager.click(); _removeOverlay(); _stopLoop(); App.showGameResult(game.score, false); };
-    rb.addEventListener('click',      onReplay);
+    rb.addEventListener('click', onReplay);
     rb.addEventListener('touchstart', e => { e.preventDefault(); onReplay(); }, { passive: false });
-    hb.addEventListener('click',      onHome);
-    hb.addEventListener('touchstart', e => { e.preventDefault(); onHome(); },   { passive: false });
-    if (isNewBest) {
-      setTimeout(() => { SoundManager.newBest(); App.showToast('🏆 New Best!', 'success', 2000); }, 400);
-    }
+    hb.addEventListener('click', onHome);
+    hb.addEventListener('touchstart', e => { e.preventDefault(); onHome(); }, { passive: false });
+    if (isNewBest) setTimeout(() => { SoundManager.newBest(); App.showToast('🏆 New Best!', 'success', 2000); }, 400);
   }
 
   function _removeOverlay() {
@@ -493,172 +428,140 @@
   }
 
   // ================================================================
-  //  KEYBOARD INPUT
-  // ================================================================
-  function _attachKeyboard() {
-    _bKeyDown = (e) => {
-      if (!game.running) return;
-      if (['Space','ArrowLeft','ArrowRight','ArrowDown','ArrowUp'].includes(e.code)) e.preventDefault();
-      _keys[e.code] = true;
-      switch (e.code) {
-        case 'ArrowLeft':  case 'KeyA': _move(-1); _dasState.left=0;  break;
-        case 'ArrowRight': case 'KeyD': _move( 1); _dasState.right=0; break;
-        case 'ArrowDown':  case 'KeyS': _softDrop(); break;
-        case 'ArrowUp':    case 'KeyW': case 'KeyX': _rotate(1);  break;
-        case 'KeyZ':                                  _rotate(-1); break;
-        case 'Space':       _hardDrop(); break;
-        case 'ShiftLeft': case 'ShiftRight': case 'KeyC': _hold(); break;
-      }
-    };
-    _bKeyUp = (e) => {
-      _keys[e.code] = false;
-      if (e.code === 'ArrowLeft'  || e.code === 'KeyA') _dasState.left  = 0;
-      if (e.code === 'ArrowRight' || e.code === 'KeyD') _dasState.right = 0;
-    };
-    window.addEventListener('keydown', _bKeyDown);
-    window.addEventListener('keyup',   _bKeyUp);
-  }
-
-  // ================================================================
-  //  MOBILE GAMEPAD
+  //  CONTROL MANAGER INTEGRATION
   // ================================================================
   /*
-    Layout (bottom of screen):
+    Your HTML button mapping (from index.html):
+    ──────────────────────────────────────────
+    D-pad:
+      data-key="ArrowUp"    → Rotate CW
+      data-key="ArrowLeft"  → Move Left
+      data-key="ArrowRight" → Move Right
+      data-key="ArrowDown"  → Soft Drop
 
-    [ ← ]  [ → ]    [ ↺ CCW ] [ ↻ CW ]
-    [ ↓ soft ]       [  HOLD  ]
-    [    ▼ HARD DROP (wide)   ]
+    Action buttons:
+      data-key=" "  (btn-a)  → Hard Drop
+      data-key="z"  (btn-b)  → Rotate CCW
+
+    Desktop keyboard (same keys + extras):
+      ArrowLeft / ArrowRight → move
+      ArrowDown              → soft drop
+      ArrowUp                → rotate CW
+      z / Z                  → rotate CCW
+      Space                  → hard drop
+      x / X                  → rotate CW (alt)
+    ──────────────────────────────────────────
   */
+  function _attachControls() {
+    ControlManager.on('keydown', 'tetris', (key) => {
+      if (!game.running) return;
+      _held[key] = true;
 
-  function _buildGamepad(container) {
-    _padEl = document.createElement('div');
-    Object.assign(_padEl.style, {
-      position:  'absolute',
-      bottom:    '0', left: '0', right: '0',
-      height:    '28%',
-      zIndex:    '20',
-      display:   'grid',
-      gridTemplateColumns: '1fr 1fr 1fr 1fr',
-      gridTemplateRows:    '1fr 1fr 1fr',
-      gap:       '5px',
-      padding:   '6px 8px 10px',
-      boxSizing: 'border-box',
-      background:'linear-gradient(to top, rgba(0,0,0,0.7), transparent)',
-      userSelect:'none'
+      switch (key) {
+        case 'ArrowLeft':                       _move(-1);   _dasLeft.n  = 0; break;
+        case 'ArrowRight':                      _move(1);    _dasRight.n = 0; break;
+        case 'ArrowDown':                       _softDrop(); _dasSoft.n  = 0; break;
+        case 'ArrowUp':   case 'x': case 'X':  _rotate(1);  break;
+        case 'z':         case 'Z':             _rotate(-1); break;
+        case ' ':         case 'Enter':         _hardDrop(); break;
+      }
     });
 
-    // Button definitions: [label, icon, gridArea, action, repeatType]
-    // repeatType: 'once' | 'hold' | 'das'
-    const btns = [
-      // Row 1
-      { id:'pad-left',  icon:'◀',   label:'Left',     area:'1/1/2/2', action:()=>_move(-1),   repeat:'das-left'  },
-      { id:'pad-right', icon:'▶',   label:'Right',    area:'1/2/2/3', action:()=>_move( 1),   repeat:'das-right' },
-      { id:'pad-ccw',   icon:'↺',   label:'Rotate↺',  area:'1/3/2/4', action:()=>_rotate(-1), repeat:'once'      },
-      { id:'pad-cw',    icon:'↻',   label:'Rotate↻',  area:'1/4/2/5', action:()=>_rotate( 1), repeat:'once'      },
-      // Row 2
-      { id:'pad-soft',  icon:'▼',   label:'Soft',     area:'2/1/3/3', action:()=>_softDrop(), repeat:'hold'      },
-      { id:'pad-hold',  icon:'⊞',   label:'Hold',     area:'2/3/3/5', action:()=>_hold(),     repeat:'once'      },
-      // Row 3 — hard drop full width
-      { id:'pad-hard',  icon:'⬇⬇', label:'Hard Drop', area:'3/1/4/5', action:()=>_hardDrop(), repeat:'once'      }
-    ];
-
-    btns.forEach(b => {
-      const btn = document.createElement('button');
-      btn.id = b.id;
-      Object.assign(btn.style, {
-        gridArea:      b.area,
-        background:    'rgba(255,255,255,0.08)',
-        border:        '1px solid rgba(255,255,255,0.18)',
-        borderRadius:  '10px',
-        color:         '#fff',
-        fontSize:      'clamp(14px,4vw,22px)',
-        fontFamily:    "'Orbitron', sans-serif",
-        cursor:        'pointer',
-        display:       'flex',
-        flexDirection: 'column',
-        alignItems:    'center',
-        justifyContent:'center',
-        gap:           '2px',
-        touchAction:   'manipulation',
-        WebkitUserSelect: 'none',
-        transition:    'background 0.08s, transform 0.08s',
-        outline:       'none'
-      });
-
-      // Label below icon
-      btn.innerHTML = `
-        <span style="font-size:1em;line-height:1">${b.icon}</span>
-        <span style="font-size:clamp(7px,1.8vw,10px);opacity:0.55;
-          letter-spacing:0.5px;font-family:'Rajdhani',sans-serif">
-          ${b.label}
-        </span>`;
-
-      // Active state style
-      const setActive = (on) => {
-        btn.style.background = on
-          ? 'rgba(160,0,240,0.45)'
-          : 'rgba(255,255,255,0.08)';
-        btn.style.transform = on ? 'scale(0.93)' : 'scale(1)';
-        btn.style.borderColor = on
-          ? 'rgba(160,0,240,0.8)'
-          : 'rgba(255,255,255,0.18)';
-      };
-
-      // Touch handling
-      const onDown = (e) => {
-        e.preventDefault();
-        if (!game.running) return;
-        setActive(true);
-        b.action();
-        _padHeld[b.id]  = true;
-        _padDas[b.id]   = 0;
-      };
-      const onUp = (e) => {
-        e.preventDefault();
-        setActive(false);
-        _padHeld[b.id] = false;
-        _padDas[b.id]  = 0;
-      };
-
-      // Store repeat type on element for update loop
-      btn.dataset.repeat = b.repeat;
-      btn.dataset.padId  = b.id;
-
-      btn.addEventListener('touchstart',  onDown, { passive: false });
-      btn.addEventListener('touchend',    onUp,   { passive: false });
-      btn.addEventListener('touchcancel', onUp,   { passive: false });
-
-      // Also handle mouse for testing on desktop
-      btn.addEventListener('mousedown', onDown);
-      btn.addEventListener('mouseup',   onUp);
-      btn.addEventListener('mouseleave',onUp);
-
-      _padEl.appendChild(btn);
+    ControlManager.on('keyup', 'tetris', (key) => {
+      _held[key] = false;
+      if (key === 'ArrowLeft')  _dasLeft.n  = 0;
+      if (key === 'ArrowRight') _dasRight.n = 0;
+      if (key === 'ArrowDown')  _dasSoft.n  = 0;
     });
-
-    container.appendChild(_padEl);
   }
 
-  function _updateGamepad() {
-    if (!_isMobile || !game.running) return;
+  function _detachControls() {
+    ControlManager.off('keydown', 'tetris');
+    ControlManager.off('keyup',   'tetris');
+    ControlManager.clearKeys();
+    Object.keys(_held).forEach(k => { _held[k] = false; });
+    _dasLeft.n = 0; _dasRight.n = 0; _dasSoft.n = 0;
+  }
 
-    // das-left
-    if (_padHeld['pad-left']) {
-      _padDas['pad-left'] = (_padDas['pad-left'] || 0) + 1;
-      const d = _padDas['pad-left'];
-      if (d > DAS_DELAY && (d - DAS_DELAY) % DAS_SPEED === 0) _move(-1);
+  // Per-frame DAS processing for held keys
+  function _processHeld() {
+    if (!game.running) return;
+
+    if (_held['ArrowLeft']) {
+      _dasLeft.n++;
+      if (_dasLeft.n > DAS_DELAY && (_dasLeft.n - DAS_DELAY) % DAS_SPEED === 0) _move(-1);
     }
-    // das-right
-    if (_padHeld['pad-right']) {
-      _padDas['pad-right'] = (_padDas['pad-right'] || 0) + 1;
-      const d = _padDas['pad-right'];
-      if (d > DAS_DELAY && (d - DAS_DELAY) % DAS_SPEED === 0) _move(1);
+    if (_held['ArrowRight']) {
+      _dasRight.n++;
+      if (_dasRight.n > DAS_DELAY && (_dasRight.n - DAS_DELAY) % DAS_SPEED === 0) _move(1);
     }
-    // soft drop hold
-    if (_padHeld['pad-soft']) {
-      _padDas['pad-soft'] = (_padDas['pad-soft'] || 0) + 1;
-      if (_padDas['pad-soft'] % 3 === 0) _softDrop();
+    if (_held['ArrowDown']) {
+      _dasSoft.n++;
+      if (_dasSoft.n > 4 && _dasSoft.n % 3 === 0) _softDrop();
     }
+  }
+
+  // ================================================================
+  //  TOUCH CONTROLS — show existing #touch-controls with correct btns
+  // ================================================================
+  function _setupTouchControls() {
+    /*
+      We use your existing HTML buttons exactly as-is:
+        dpad-up    data-key="ArrowUp"    → Rotate CW
+        dpad-left  data-key="ArrowLeft"  → Move Left
+        dpad-right data-key="ArrowRight" → Move Right
+        dpad-down  data-key="ArrowDown"  → Soft Drop
+        btn-a      data-key=" "          → Hard Drop
+        btn-b      data-key="z"          → Rotate CCW
+
+      We relabel the icons so players understand Tetris context.
+    */
+    ControlManager.showTouchControls({
+      dpad:    true,
+      actions: true,
+      center:  false
+    });
+    _relabelButtons();
+  }
+
+  function _relabelButtons() {
+    // Map data-key → new inner HTML  (icon + tiny label)
+    const map = {
+      'ArrowUp':    { icon: '↻',    sub: 'Rotate' },
+      'ArrowLeft':  { icon: '◀',    sub: 'Left'   },
+      'ArrowRight': { icon: '▶',    sub: 'Right'  },
+      'ArrowDown':  { icon: '▼',    sub: 'Soft'   },
+      ' ':          { icon: '⬇⬇',  sub: 'Drop'   },
+      'z':          { icon: '↺',    sub: 'Rotate' }
+    };
+
+    Object.entries(map).forEach(([key, { icon, sub }]) => {
+      // target both dpad-btn and action-btn with matching data-key
+      const sel = `.dpad-btn[data-key="${key}"], .action-btn[data-key="${key}"]`;
+      document.querySelectorAll(sel).forEach(btn => {
+        btn.innerHTML = `
+          <span style="display:block;font-size:1.15em;line-height:1.1">${icon}</span>
+          <span style="display:block;font-size:clamp(7px,1.5vw,9px);
+            opacity:0.6;font-family:'Rajdhani',sans-serif;
+            letter-spacing:0.4px;margin-top:1px">${sub}</span>`;
+      });
+    });
+  }
+
+  function _restoreButtonLabels() {
+    // Restore original icon-only labels from index.html
+    const orig = {
+      'ArrowUp':    '<i class="fas fa-chevron-up"></i>',
+      'ArrowLeft':  '<i class="fas fa-chevron-left"></i>',
+      'ArrowRight': '<i class="fas fa-chevron-right"></i>',
+      'ArrowDown':  '<i class="fas fa-chevron-down"></i>',
+      ' ':          'A',
+      'z':          'B'
+    };
+    Object.entries(orig).forEach(([key, html]) => {
+      const sel = `.dpad-btn[data-key="${key}"], .action-btn[data-key="${key}"]`;
+      document.querySelectorAll(sel).forEach(btn => { btn.innerHTML = html; });
+    });
   }
 
   // ================================================================
@@ -673,18 +576,14 @@
     _canvas = document.createElement('canvas');
     Object.assign(_canvas.style, {
       position: 'absolute', top: '0', left: '0',
-      width: '100%', height: '100%',
-      zIndex: '1', display: 'block'
+      width: '100%', height: '100%', zIndex: '1', display: 'block'
     });
     container.appendChild(_canvas);
     _ctx = _canvas.getContext('2d');
 
-    _isMobile = _isMobileDevice();
-    if (_isMobile) _buildGamepad(container);
-
     _injectCSS();
     _resize();
-    _resizeHandler = () => { _isMobile = _isMobileDevice(); _resize(); };
+    _resizeHandler = () => _resize();
     window.addEventListener('resize', _resizeHandler);
   }
 
@@ -745,19 +644,16 @@
     _stopLoop();
     _emptyBoard();
     particles = []; lineFlash = [];
-    holdPiece = null; holdUsed = false;
     _bag = []; _refillBag();
-    nextQueue = [_nextFromBag(), _nextFromBag(), _nextFromBag()];
+    nextPiece = _nextFromBag();
 
-    game.running = true; game.over   = false;
-    game.score   = 0;    game.lines  = 0;
-    game.level   = 1;    game.combo  = 0; game.time = 0;
-    _dropAccum   = 0;    _lastTime   = 0;
+    game.running = true; game.over  = false;
+    game.score   = 0;    game.lines = 0;
+    game.level   = 1;    game.combo = 0; game.time = 0;
+    _dropAccum   = 0;    _lastTime  = 0;
 
-    Object.keys(_keys).forEach(k => { _keys[k] = false; });
-    Object.keys(_padHeld).forEach(k => { _padHeld[k] = false; });
-    _dasState.left = 0; _dasState.right = 0;
-    _padDas.left   = 0; _padDas.right   = 0; _padDas.down = 0;
+    Object.keys(_held).forEach(k => { _held[k] = false; });
+    _dasLeft.n = 0; _dasRight.n = 0; _dasSoft.n = 0;
 
     _spawn();
     _updateHUD();
@@ -772,19 +668,7 @@
     if (!game.running) { _updateParticles(); return; }
     game.time++;
 
-    // Keyboard DAS
-    if (_keys['ArrowLeft']  || _keys['KeyA']) {
-      _dasState.left++;
-      if (_dasState.left > DAS_DELAY && (_dasState.left - DAS_DELAY) % DAS_SPEED === 0) _move(-1);
-    }
-    if (_keys['ArrowRight'] || _keys['KeyD']) {
-      _dasState.right++;
-      if (_dasState.right > DAS_DELAY && (_dasState.right - DAS_DELAY) % DAS_SPEED === 0) _move(1);
-    }
-    if (_keys['ArrowDown']  || _keys['KeyS']) _softDrop();
-
-    // Gamepad repeat
-    _updateGamepad();
+    _processHeld();
 
     // Gravity
     _dropAccum += dt;
@@ -792,7 +676,7 @@
     while (_dropAccum >= interval) {
       _dropAccum -= interval;
       if (piece) {
-        if (_valid(piece, 1)) { piece = { ...piece, row: piece.row+1 }; lockTimer = 0; }
+        if (_valid(piece, 1)) { piece = { ...piece, row: piece.row + 1 }; lockTimer = 0; }
         else { lockTimer++; if (lockTimer >= LOCK_DELAY) _lock(); }
       }
     }
@@ -802,7 +686,7 @@
   }
 
   function _updateParticles() {
-    for (let i = particles.length-1; i >= 0; i--) {
+    for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
       p.x += p.vx; p.y += p.vy; p.vy += 0.12; p.life--;
       if (p.life <= 0) particles.splice(i, 1);
@@ -823,235 +707,260 @@
     const bw   = cs * COLS;
     const bh   = cs * ROWS;
 
-    // Board border
+    // ---- Board border ----
     _ctx.save();
     _ctx.fillStyle   = 'rgba(255,255,255,0.03)';
-    _ctx.strokeStyle = 'rgba(160,0,240,0.3)';
+    _ctx.strokeStyle = 'rgba(160,0,240,0.35)';
     _ctx.lineWidth   = 1.5;
-    _roundRect(orig.x-2, orig.y-2, bw+4, bh+4, 4);
+    _roundRect(orig.x - 2, orig.y - 2, bw + 4, bh + 4, 4);
     _ctx.fill(); _ctx.stroke();
     _ctx.restore();
 
-    // Grid
+    // ---- Grid lines ----
     _ctx.save();
     _ctx.strokeStyle = 'rgba(255,255,255,0.04)';
     _ctx.lineWidth   = 0.5;
     for (let r = 0; r <= ROWS; r++) {
       _ctx.beginPath();
-      _ctx.moveTo(orig.x, orig.y+r*cs); _ctx.lineTo(orig.x+bw, orig.y+r*cs); _ctx.stroke();
+      _ctx.moveTo(orig.x, orig.y + r*cs);
+      _ctx.lineTo(orig.x + bw, orig.y + r*cs);
+      _ctx.stroke();
     }
     for (let c = 0; c <= COLS; c++) {
       _ctx.beginPath();
-      _ctx.moveTo(orig.x+c*cs, orig.y); _ctx.lineTo(orig.x+c*cs, orig.y+bh); _ctx.stroke();
+      _ctx.moveTo(orig.x + c*cs, orig.y);
+      _ctx.lineTo(orig.x + c*cs, orig.y + bh);
+      _ctx.stroke();
     }
     _ctx.restore();
 
-    // Board cells
+    // ---- Placed cells ----
     for (let r = HIDDEN_ROWS; r < TOTAL_ROWS; r++) {
-      const dr = r - HIDDEN_ROWS;
+      const dr      = r - HIDDEN_ROWS;
       const isFlash = lineFlash.some(f => f.row === r);
       for (let c = 0; c < COLS; c++) {
         if (board[r][c]) {
-          if (isFlash) _drawCell(orig.x+c*cs, orig.y+dr*cs, cs, '#fff', '#aaa', 1);
-          else         _drawCell(orig.x+c*cs, orig.y+dr*cs, cs, board[r][c], SHADOW[_typeFromColor(board[r][c])]);
+          if (isFlash) _drawCell(orig.x + c*cs, orig.y + dr*cs, cs, '#fff', '#ccc', 1);
+          else         _drawCell(orig.x + c*cs, orig.y + dr*cs, cs, board[r][c], SHADOW[_typeFromColor(board[r][c])]);
         }
       }
     }
 
-    // Ghost piece
+    // ---- Ghost piece ----
     if (piece && game.running) {
       const gr = _ghostRow(piece);
       if (gr !== piece.row) {
         _ctx.save(); _ctx.globalAlpha = 0.18;
-        SHAPES[piece.type][piece.rot].forEach(([dr,dc]) => {
-          const rr = gr+dr, cc = piece.col+dc;
+        SHAPES[piece.type][piece.rot].forEach(([dr, dc]) => {
+          const rr = gr + dr, cc = piece.col + dc;
           if (rr >= HIDDEN_ROWS)
-            _drawCell(orig.x+cc*cs, orig.y+(rr-HIDDEN_ROWS)*cs, cs, COLORS[piece.type], SHADOW[piece.type]);
+            _drawCell(orig.x + cc*cs, orig.y + (rr - HIDDEN_ROWS)*cs, cs, COLORS[piece.type], SHADOW[piece.type]);
         });
         _ctx.restore();
       }
     }
 
-    // Active piece
+    // ---- Active piece ----
     if (piece) {
-      const blink = Math.floor(game.time/4)%2===0;
-      const alpha = (lockTimer > LOCK_DELAY*0.7 && !blink) ? 0.45 : 1;
+      const blink = Math.floor(game.time / 4) % 2 === 0;
+      const alpha = (lockTimer > LOCK_DELAY * 0.7 && !blink) ? 0.45 : 1;
       _ctx.save(); _ctx.globalAlpha = alpha;
-      SHAPES[piece.type][piece.rot].forEach(([dr,dc]) => {
-        const rr = piece.row+dr, cc = piece.col+dc;
+      SHAPES[piece.type][piece.rot].forEach(([dr, dc]) => {
+        const rr = piece.row + dr, cc = piece.col + dc;
         if (rr >= HIDDEN_ROWS)
-          _drawCell(orig.x+cc*cs, orig.y+(rr-HIDDEN_ROWS)*cs, cs, COLORS[piece.type], SHADOW[piece.type]);
+          _drawCell(orig.x + cc*cs, orig.y + (rr - HIDDEN_ROWS)*cs, cs, COLORS[piece.type], SHADOW[piece.type]);
       });
       _ctx.restore();
     }
 
-    // Particles
+    // ---- Particles ----
     particles.forEach(p => {
-      const a = Math.max(0, p.life/p.maxLife);
+      const a = Math.max(0, p.life / p.maxLife);
       _ctx.save();
       _ctx.globalAlpha = a;
       _ctx.fillStyle   = p.color;
       _ctx.shadowColor = p.color;
       _ctx.shadowBlur  = 6;
-      _ctx.beginPath(); _ctx.arc(p.x, p.y, Math.max(0.5, p.size*a), 0, Math.PI*2); _ctx.fill();
+      _ctx.beginPath();
+      _ctx.arc(p.x, p.y, Math.max(0.5, p.size * a), 0, Math.PI * 2);
+      _ctx.fill();
       _ctx.restore();
     });
 
-    // Side panels
-    _drawSidePanels(orig, cs, bw, bh);
+    // ---- Desktop side panels (NEXT + STATS + KEY HINTS) ----
+    // Only draw when NOT a touch device — avoids clutter on mobile
+    if (!_touch()) _drawDesktopPanels(orig, cs, bw, bh);
 
-    // Desktop key hints
-    if (!_isMobile) _drawKeyHints(orig, cs, bh);
+    // ---- Mobile minimal HUD (level indicator top-right of board) ----
+    if (_touch()) _drawMobileHUD(orig, cs, bw);
   }
 
   // ================================================================
-  //  SIDE PANELS
+  //  DESKTOP PANELS  (NEXT piece + stats + key hints)
+  //  Only rendered on non-touch devices
   // ================================================================
-  function _drawSidePanels(orig, cs, bw, bh) {
-    const rightX = orig.x + bw + 14;
-    const leftX  = orig.x - cs*4 - 14;
+  function _drawDesktopPanels(orig, cs, bw, bh) {
+    const rightX = orig.x + bw + 16;
+    const leftX  = orig.x - cs * 4 - 16;
     const panelW = cs * 4;
-    const lblSz  = Math.max(9, cs*0.38);
     const font   = `'Orbitron', sans-serif`;
+    const lblSz  = Math.max(9, cs * 0.38);
 
-    // RIGHT — NEXT
+    // ── RIGHT: NEXT piece ──
     _ctx.save();
     _ctx.fillStyle   = 'rgba(255,255,255,0.03)';
     _ctx.strokeStyle = 'rgba(160,0,240,0.22)';
     _ctx.lineWidth   = 1;
-    _roundRect(rightX, orig.y, panelW, cs*14, 6);
+    _roundRect(rightX, orig.y, panelW, cs * 5.5, 6);
     _ctx.fill(); _ctx.stroke();
+
     _ctx.fillStyle = 'rgba(160,0,240,0.85)';
     _ctx.font      = `bold ${lblSz}px ${font}`;
     _ctx.textAlign = 'center';
-    _ctx.fillText('NEXT', rightX+panelW/2, orig.y+lblSz+8);
-    nextQueue.forEach((type, i) => {
-      _drawMiniPiece(type, rightX+panelW/2, orig.y+lblSz+22+i*(cs*3.2)+cs*1.2, cs*0.72);
-    });
+    _ctx.fillText('NEXT', rightX + panelW/2, orig.y + lblSz + 8);
+
+    if (nextPiece) {
+      _drawMiniPiece(nextPiece, rightX + panelW/2, orig.y + lblSz + 26 + cs * 1.2, cs * 0.72);
+    }
     _ctx.restore();
 
-    // LEFT — HOLD + STATS
+    // ── LEFT: STATS ──
     _ctx.save();
     _ctx.fillStyle   = 'rgba(255,255,255,0.03)';
     _ctx.strokeStyle = 'rgba(0,240,240,0.22)';
     _ctx.lineWidth   = 1;
-    _roundRect(leftX, orig.y, panelW, cs*8, 6);
+    _roundRect(leftX, orig.y, panelW, cs * 8, 6);
     _ctx.fill(); _ctx.stroke();
-    _ctx.fillStyle = 'rgba(0,240,240,0.85)';
-    _ctx.font      = `bold ${lblSz}px ${font}`;
-    _ctx.textAlign = 'center';
-    _ctx.fillText('HOLD', leftX+panelW/2, orig.y+lblSz+8);
-    if (holdPiece) {
-      _ctx.globalAlpha = holdUsed ? 0.35 : 1;
-      _drawMiniPiece(holdPiece.type, leftX+panelW/2, orig.y+lblSz+26+cs*1.2, cs*0.72);
-      _ctx.globalAlpha = 1;
-    }
 
-    const statsY    = orig.y + cs*5.2;
-    const statFont  = `'Rajdhani', sans-serif`;
-    const statSz    = Math.max(8, cs*0.35);
-    [['SCORE',game.score],['LINES',game.lines],['LEVEL',game.level]].forEach(([lbl,val],i) => {
-      const sy = statsY + i*(cs*1.6);
+    const statSz   = Math.max(8, cs * 0.35);
+    const statFont = `'Rajdhani', sans-serif`;
+    const statsY   = orig.y + cs * 0.6;
+
+    [['SCORE', game.score], ['LINES', game.lines], ['LEVEL', game.level]].forEach(([lbl, val], i) => {
+      const sy = statsY + i * (cs * 1.7);
       _ctx.fillStyle = 'rgba(255,255,255,0.45)';
       _ctx.font      = `${statSz}px ${statFont}`;
       _ctx.textAlign = 'center';
-      _ctx.fillText(lbl, leftX+panelW/2, sy);
+      _ctx.fillText(lbl, leftX + panelW/2, sy + statSz);
       _ctx.fillStyle = '#fff';
-      _ctx.font      = `bold ${statSz*1.4}px ${font}`;
-      _ctx.fillText(val, leftX+panelW/2, sy+statSz*1.5);
+      _ctx.font      = `bold ${statSz * 1.4}px ${font}`;
+      _ctx.fillText(val, leftX + panelW/2, sy + statSz * 2.8);
+    });
+    _ctx.restore();
+
+    // ── KEY HINTS (below left panel) ──
+    _drawKeyHints(leftX, panelW, orig.y + cs * 8 + 12, cs);
+  }
+
+  function _drawKeyHints(x, w, startY, cs) {
+    const hints = [
+      ['← →',   'Move'],
+      ['↑ / X',  'Rotate CW'],
+      ['Z',      'Rotate CCW'],
+      ['↓',      'Soft Drop'],
+      ['Space',  'Hard Drop']
+    ];
+    const sz   = Math.max(7, cs * 0.27);
+    const font = `'Orbitron', sans-serif`;
+    _ctx.save();
+    _ctx.textAlign = 'center';
+    hints.forEach(([key, desc], i) => {
+      const y = startY + i * (sz * 2.5);
+      _ctx.font      = `bold ${sz}px ${font}`;
+      _ctx.fillStyle = 'rgba(160,0,240,0.65)';
+      _ctx.fillText(key, x + w/2, y);
+      _ctx.font      = `${sz * 0.85}px 'Rajdhani', sans-serif`;
+      _ctx.fillStyle = 'rgba(255,255,255,0.28)';
+      _ctx.fillText(desc, x + w/2, y + sz * 1.2);
     });
     _ctx.restore();
   }
 
   // ================================================================
-  //  DESKTOP KEY HINTS
+  //  MOBILE MINIMAL HUD — level badge + score inside board area
+  //  Drawn as a compact bar at the top of the canvas (above board)
   // ================================================================
-  function _drawKeyHints(orig, cs, bh) {
-    const hints = [
-      ['←→ / A D', 'Move'],
-      ['↑ / W / X', 'Rotate CW'],
-      ['Z',         'Rotate CCW'],
-      ['↓ / S',     'Soft Drop'],
-      ['Space',     'Hard Drop'],
-      ['C / Shift', 'Hold']
-    ];
-    const x    = orig.x - cs*4 - 14;
-    const startY = orig.y + bh - hints.length * (cs*0.75) - 4;
-    const sz   = Math.max(8, cs*0.3);
+  function _drawMobileHUD(orig, cs, bw) {
+    const y    = orig.y - cs * 0.55;
+    const font = `'Orbitron', sans-serif`;
+    const sz   = Math.max(9, cs * 0.38);
 
     _ctx.save();
-    _ctx.textAlign = 'center';
-    hints.forEach(([key, desc], i) => {
-      const y = startY + i*(sz*2.1);
-      _ctx.font      = `bold ${sz}px 'Orbitron',sans-serif`;
-      _ctx.fillStyle = 'rgba(160,0,240,0.7)';
-      _ctx.fillText(key, x + cs*2, y);
-      _ctx.font      = `${sz*0.85}px 'Rajdhani',sans-serif`;
-      _ctx.fillStyle = 'rgba(255,255,255,0.3)';
-      _ctx.fillText(desc, x + cs*2, y + sz*1.1);
-    });
+    _ctx.textAlign = 'left';
+    _ctx.font      = `bold ${sz}px ${font}`;
+    _ctx.fillStyle = 'rgba(160,0,240,0.85)';
+    _ctx.fillText(`LV ${game.level}`, orig.x, y);
+
+    _ctx.textAlign = 'right';
+    _ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    _ctx.fillText(`${game.lines} lines`, orig.x + bw, y);
     _ctx.restore();
   }
 
   // ================================================================
   //  DRAW HELPERS
   // ================================================================
-  function _drawCell(x, y, cs, color, shadow, alpha=1) {
-    const pad = Math.max(1, cs*0.05);
+  function _drawCell(x, y, cs, color, shadow, alpha = 1) {
+    const pad = Math.max(1, cs * 0.05);
     _ctx.save();
     _ctx.globalAlpha *= alpha;
+    // Shadow layer
     _ctx.fillStyle = shadow || '#333';
-    _ctx.fillRect(x+pad, y+pad, cs-pad*2, cs-pad*2);
-    const g = _ctx.createLinearGradient(x, y, x+cs, y+cs);
-    g.addColorStop(0,   _lighten(color,30));
+    _ctx.fillRect(x + pad, y + pad, cs - pad*2, cs - pad*2);
+    // Gradient fill
+    const g = _ctx.createLinearGradient(x, y, x + cs, y + cs);
+    g.addColorStop(0,   _lighten(color, 30));
     g.addColorStop(0.5, color);
-    g.addColorStop(1,   _darken(color,30));
+    g.addColorStop(1,   _darken(color, 30));
     _ctx.fillStyle = g;
-    _ctx.fillRect(x+pad, y+pad, cs-pad*2-2, cs-pad*2-2);
-    _ctx.fillStyle = 'rgba(255,255,255,0.18)';
-    _ctx.fillRect(x+pad, y+pad, cs-pad*2-2, Math.floor(cs*0.3));
+    _ctx.fillRect(x + pad, y + pad, cs - pad*2 - 2, cs - pad*2 - 2);
+    // Gloss
+    _ctx.fillStyle = 'rgba(255,255,255,0.17)';
+    _ctx.fillRect(x + pad, y + pad, cs - pad*2 - 2, Math.floor(cs * 0.3));
     _ctx.restore();
   }
 
   function _drawMiniPiece(type, cx, cy, cs) {
     const shape = SHAPES[type][0];
-    const minR  = Math.min(...shape.map(([r])=>r));
-    const maxR  = Math.max(...shape.map(([r])=>r));
-    const minC  = Math.min(...shape.map(([,c])=>c));
-    const maxC  = Math.max(...shape.map(([,c])=>c));
-    const offX  = -(minC+maxC+1)/2*cs;
-    const offY  = -(minR+maxR+1)/2*cs;
-    shape.forEach(([r,c]) => _drawCell(cx+offX+c*cs, cy+offY+r*cs, cs, COLORS[type], SHADOW[type]));
+    const minR  = Math.min(...shape.map(([r])   => r));
+    const maxR  = Math.max(...shape.map(([r])   => r));
+    const minC  = Math.min(...shape.map(([,c])  => c));
+    const maxC  = Math.max(...shape.map(([,c])  => c));
+    const offX  = -(minC + maxC + 1) / 2 * cs;
+    const offY  = -(minR + maxR + 1) / 2 * cs;
+    shape.forEach(([r, c]) =>
+      _drawCell(cx + offX + c*cs, cy + offY + r*cs, cs, COLORS[type], SHADOW[type])
+    );
   }
 
-  function _roundRect(x,y,w,h,r) {
+  function _roundRect(x, y, w, h, r) {
     _ctx.beginPath();
-    _ctx.moveTo(x+r,y);
-    _ctx.lineTo(x+w-r,y);   _ctx.arcTo(x+w,y,   x+w,  y+r,  r);
-    _ctx.lineTo(x+w,y+h-r); _ctx.arcTo(x+w,y+h, x+w-r,y+h,  r);
-    _ctx.lineTo(x+r,y+h);   _ctx.arcTo(x,  y+h, x,    y+h-r,r);
-    _ctx.lineTo(x,y+r);     _ctx.arcTo(x,  y,   x+r,  y,    r);
+    _ctx.moveTo(x+r, y);
+    _ctx.lineTo(x+w-r, y);    _ctx.arcTo(x+w, y,   x+w,   y+r,   r);
+    _ctx.lineTo(x+w, y+h-r);  _ctx.arcTo(x+w, y+h, x+w-r, y+h,   r);
+    _ctx.lineTo(x+r, y+h);    _ctx.arcTo(x,   y+h, x,     y+h-r, r);
+    _ctx.lineTo(x, y+r);      _ctx.arcTo(x,   y,   x+r,   y,     r);
     _ctx.closePath();
   }
 
-  function _lighten(hex,amt) { return _shiftColor(hex, amt);  }
-  function _darken(hex,amt)  { return _shiftColor(hex,-amt);  }
-  function _shiftColor(hex,amt) {
-    const n=parseInt(hex.replace('#',''),16);
-    const r=Math.min(255,Math.max(0,(n>>16)+amt));
-    const g=Math.min(255,Math.max(0,((n>>8)&0xff)+amt));
-    const b=Math.min(255,Math.max(0,(n&0xff)+amt));
+  function _lighten(h, a) { return _shiftColor(h,  a); }
+  function _darken(h, a)  { return _shiftColor(h, -a); }
+  function _shiftColor(hex, amt) {
+    const n = parseInt(hex.replace('#',''), 16);
+    const r = Math.min(255, Math.max(0, (n >> 16) + amt));
+    const g = Math.min(255, Math.max(0, ((n >> 8) & 0xff) + amt));
+    const b = Math.min(255, Math.max(0, (n & 0xff) + amt));
     return `rgb(${r},${g},${b})`;
   }
 
-  const _colorTypeMap = Object.fromEntries(Object.entries(COLORS).map(([k,v])=>[v,k]));
-  function _typeFromColor(c) { return _colorTypeMap[c]||'I'; }
+  const _colorTypeMap = Object.fromEntries(Object.entries(COLORS).map(([k,v]) => [v, k]));
+  function _typeFromColor(c) { return _colorTypeMap[c] || 'I'; }
 
   // ================================================================
   //  MAIN LOOP
   // ================================================================
   function _loop(ts) {
-    const dt = _lastTime ? Math.min(ts-_lastTime, 100) : 16;
+    const dt = _lastTime ? Math.min(ts - _lastTime, 100) : 16;
     _lastTime = ts;
     _update(dt);
     _draw();
@@ -1074,18 +983,21 @@
     start(container) {
       _buildDOM(container);
       _showLoadingOverlay();
-      setTimeout(() => { _attachKeyboard(); _startGame(); }, 650);
+      _attachControls();
+      _setupTouchControls();
+      setTimeout(() => _startGame(), 650);
     },
     destroy() {
       _stopLoop();
-      if (_bKeyDown) window.removeEventListener('keydown', _bKeyDown);
-      if (_bKeyUp)   window.removeEventListener('keyup',   _bKeyUp);
+      _detachControls();
+      _restoreButtonLabels();
+      ControlManager.hideTouchControls();
       if (_resizeHandler) window.removeEventListener('resize', _resizeHandler);
-      [_loadingEl, _padEl, _overlayEl, _canvas].forEach(el => {
+      [_loadingEl, _overlayEl, _canvas].forEach(el => {
         if (el && el.parentNode) el.parentNode.removeChild(el);
       });
       _canvas = _ctx = null;
-      _loadingEl = _padEl = _overlayEl = null;
+      _loadingEl = _overlayEl = null;
       game.running = false;
     },
     restart() { _removeOverlay(); _startGame(); }
@@ -1098,10 +1010,10 @@
     id:          'tetris',
     title:       'Tetris',
     category:    'puzzle',
-    description: 'Classic Tetris — hold, ghost piece, combos & levels!',
+    description: 'Classic Tetris — ghost piece, combos & levels!',
     emoji:       '🧱',
     difficulty:  'medium',
-    controls:    { dpad: false, actions: false, center: false },
+    controls:    { dpad: true, actions: true, center: false },
     version:     '1.0',
     init:        (c) => Tetris.start(c),
     destroy:     () => Tetris.destroy(),
