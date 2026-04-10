@@ -1,10 +1,3 @@
-/* ================================================
-   BLOCK DROP
-   Classic falling tetromino puzzle game.
-   Category: Puzzle
-   Template: A (Canvas)
-   ================================================ */
-
 (function () {
   'use strict';
 
@@ -15,9 +8,9 @@
   const ROWS = 20;
   const EMPTY = 0;
 
-  // Shapes & Colors (Using bright neon colors)
+  // Shapes & Colors (Neon Theme)
   const SHAPES = [
-    [], // Empty placeholder for 1-based indexing
+    [], // Empty placeholder
     { matrix: [[1, 1, 1, 1]], color: '#00ffff' }, // I - Cyan
     { matrix: [[2, 0, 0], [2, 2, 2]], color: '#0055ff' }, // J - Blue
     { matrix: [[0, 0, 3], [3, 3, 3]], color: '#ffaa00' }, // L - Orange
@@ -68,9 +61,7 @@
     running: false, score: 0, lines: 0, level: 1,
     highScore: parseInt(localStorage.getItem('blockdrop_hi') || '0'),
     lastDropTime: 0, dropInterval: 1000,
-    // Input delays
-    lastMoveTime: 0, moveInterval: 120, // DAS (Delayed Auto Shift)
-    lastJoyTapTime: 0
+    lastMoveTime: 0, moveInterval: 150 // DAS delay
   };
 
   // ==============================================================================
@@ -79,13 +70,12 @@
   function W() { return _canvas ? _canvas.width : window.innerWidth; }
   function H() { return _canvas ? _canvas.height : window.innerHeight; }
 
-  // Generate a random piece
   function _randomPiece() {
     const id = Math.floor(Math.random() * 7) + 1;
     const shape = SHAPES[id];
     return {
       id: id,
-      matrix: JSON.parse(JSON.stringify(shape.matrix)), // Deep copy
+      matrix: JSON.parse(JSON.stringify(shape.matrix)),
       color: shape.color,
       x: Math.floor(COLS / 2) - Math.floor(shape.matrix[0].length / 2),
       y: 0
@@ -120,23 +110,22 @@
     }
   };
 
-  // REGISTER GAME (Rule 1 & 2)
   GameRegistry.register({
     id: 'block-drop',
     title: 'Block Drop',
     category: 'puzzle',
-    description: 'Rotate and drop falling blocks to clear lines and score points!',
+    description: 'Classic falling blocks! Clear lines to level up.',
     emoji: '🧱',
     difficulty: 'medium',
     controls: { dpad: true, actions: true, center: false },
-    version: '1.0',
+    version: '1.1',
     init: (c) => BlockDrop.start(c),
     destroy: () => BlockDrop.destroy(),
     restart: () => BlockDrop.restart()
   });
 
   // ==============================================================================
-  // 5. DOM & RESPONSIVENESS (Rule 14)
+  // 5. DOM & RESPONSIVENESS (Rule 14) - FULL SCREEN MOBILE FIX
   // ==============================================================================
   function _buildDOM(container) {
     _canvas = document.createElement('canvas');
@@ -159,12 +148,10 @@
     _hudEl = document.createElement('div');
     _hudEl.style.position = 'absolute';
     _hudEl.style.top = '10px'; _hudEl.style.left = '10px';
-    _hudEl.style.color = 'var(--primary, #00ffff)';
+    _hudEl.style.color = '#ffffff';
     _hudEl.style.fontFamily = 'Orbitron, sans-serif';
-    _hudEl.style.fontSize = '20px';
     _hudEl.style.zIndex = '20';
     _hudEl.style.pointerEvents = 'none';
-    _hudEl.style.textShadow = '0 0 5px var(--primary)';
 
     container.appendChild(_canvas);
     container.appendChild(_joyCanvas);
@@ -177,65 +164,71 @@
 
   function _resize() {
     if (!_canvas) return;
-    const p = _canvas.parentElement;
-    const w = p ? p.clientWidth : window.innerWidth;
-    const h = p ? p.clientHeight : window.innerHeight;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
     
     _canvas.width = w; _canvas.height = h;
     if (_joyCanvas) { _joyCanvas.width = w; _joyCanvas.height = h; }
 
-    // Calculate Grid Layout - Keep aspect ratio
-    // Leave 10% padding top/bottom
-    const availableH = h * 0.8;
-    const availableW = w * 0.9;
+    // Maximize Grid:
+    // Leave 80px at the top for HUD and NEXT piece. Leave 20px at bottom.
+    const maxW = w * 0.95;
+    const maxH = h - 100;
     
-    _cellSize = Math.floor(Math.min(availableW / COLS, availableH / ROWS));
+    _cellSize = Math.floor(Math.min(maxW / COLS, maxH / ROWS));
     
+    // Center Horizontally
     _boardX = Math.floor((w - (_cellSize * COLS)) / 2);
-    _boardY = Math.floor((h - (_cellSize * ROWS)) / 2);
+    // Push to bottom to leave top space
+    _boardY = h - (_cellSize * ROWS) - 20;
   }
 
   // ==============================================================================
   // 6. INPUT HANDLING
   // ==============================================================================
   function _attachListeners() {
-    // Keyboard Input (Rule 8)
     ControlManager.on('keydown', 'block-drop', key => {
       if (!game.running || _gameOverPending) return;
-      
       if (key === 'ArrowLeft')  _move(-1);
       if (key === 'ArrowRight') _move(1);
-      if (key === 'ArrowDown')  _drop();
+      if (key === 'ArrowDown')  _softDrop();
       if (key === 'ArrowUp')    _rotate();
       if (key === ' ')          _hardDrop();
     });
 
-    // Touch Support & Mobile Joystick (Rules 18 & 20)
     _joyCanvas.addEventListener('touchstart', _handleTouchStart, { passive: false });
     _joyCanvas.addEventListener('touchmove', _handleTouchMove, { passive: false });
     _joyCanvas.addEventListener('touchend', _handleTouchEnd, { passive: false });
-    _joyCanvas.addEventListener('touchcancel', _handleTouchEnd, { passive: false });
   }
 
   function _removeListeners() {
-    // Events tied to DOM elements clean themselves up on removal
+    ControlManager.off('keydown', 'block-drop');
   }
 
   function _handleTouchStart(e) {
     e.preventDefault();
+    if (!game.running || _gameOverPending) return;
+
     for (let i = 0; i < e.changedTouches.length; i++) {
       const t = e.changedTouches[i];
-      // Left side = Joystick (Move)
-      if (t.clientX < window.innerWidth / 2 && !joystick.active) {
+      const cx = t.clientX;
+      const cy = t.clientY;
+
+      // Left Half = Joystick
+      if (cx < W() / 2 && !joystick.active) {
         joystick.active = true;
         joystick.touchId = t.identifier;
-        joystick.baseX = t.clientX; joystick.baseY = t.clientY;
-        joystick.stickX = t.clientX; joystick.stickY = t.clientY;
+        joystick.baseX = cx; joystick.baseY = cy;
+        joystick.stickX = cx; joystick.stickY = cy;
         joystick.dx = 0; joystick.dy = 0;
       } 
-      // Right side = Tap to Rotate
-      else if (t.clientX >= window.innerWidth / 2 && game.running) {
-        _rotate();
+      // Right Half = Actions
+      else if (cx >= W() / 2) {
+        if (cy < H() / 2) {
+          _rotate(); // Top Right Tap
+        } else {
+          _hardDrop(); // Bottom Right Tap
+        }
       }
     }
   }
@@ -261,12 +254,13 @@
         joystick.dx = dx / joystick.maxDist;
         joystick.dy = dy / joystick.maxDist;
 
-        // Apply movement based on joystick tilt
+        // DAS (Delayed Auto Shift) Movement
         const now = Date.now();
         if (now - game.lastMoveTime > game.moveInterval) {
-          if (joystick.dx < -0.5) { _move(-1); game.lastMoveTime = now; }
-          else if (joystick.dx > 0.5) { _move(1); game.lastMoveTime = now; }
-          else if (joystick.dy > 0.6) { _drop(); game.lastMoveTime = now; }
+          if (joystick.dx < -0.4) { _move(-1); game.lastMoveTime = now; }
+          else if (joystick.dx > 0.4) { _move(1); game.lastMoveTime = now; }
+          
+          if (joystick.dy > 0.5) { _softDrop(); game.lastMoveTime = now; }
         }
       }
     }
@@ -279,21 +273,15 @@
       if (joystick.active && t.identifier === joystick.touchId) {
         joystick.active = false;
         joystick.touchId = null;
-        joystick.dx = 0; joystick.dy = 0;
       }
     }
   }
 
   // ==============================================================================
-  // 7. GAME LOGIC (TETRIS MECHANICS)
+  // 7. ROBUST TETRIS LOGIC
   // ==============================================================================
   function _startGame() {
-    // Reset Board
-    _board = [];
-    for (let r = 0; r < ROWS; r++) {
-      _board[r] = new Array(COLS).fill(EMPTY);
-    }
-    
+    _board = Array.from({ length: ROWS }, () => new Array(COLS).fill(EMPTY));
     game.score = 0; game.lines = 0; game.level = 1;
     game.dropInterval = 1000;
     game.lastDropTime = Date.now();
@@ -310,16 +298,13 @@
   }
 
   function _collide(p = _piece) {
-    const m = p.matrix;
-    for (let r = 0; r < m.length; r++) {
-      for (let c = 0; c < m[r].length; c++) {
-        if (m[r][c] !== EMPTY) {
+    for (let r = 0; r < p.matrix.length; r++) {
+      for (let c = 0; c < p.matrix[r].length; c++) {
+        if (p.matrix[r][c] !== EMPTY) {
           const newX = p.x + c;
           const newY = p.y + r;
-          // Bounds check
-          if (newX < 0 || newX >= COLS || newY >= ROWS) return true;
-          // Piece collision check
-          if (newY >= 0 && _board[newY][newX] !== EMPTY) return true;
+          if (newX < 0 || newX >= COLS || newY >= ROWS) return true; // Walls/Floor
+          if (newY >= 0 && _board[newY][newX] !== EMPTY) return true; // Blocks
         }
       }
     }
@@ -329,20 +314,19 @@
   function _move(dir) {
     _piece.x += dir;
     if (_collide()) {
-      _piece.x -= dir; // Revert
+      _piece.x -= dir;
     } else {
-      SoundManager.navigate(); // UI tick for move
+      SoundManager.navigate();
     }
   }
 
-  function _drop() {
+  function _softDrop() {
     _piece.y++;
     if (_collide()) {
       _piece.y--;
       _lockPiece();
     } else {
-      game.lastDropTime = Date.now();
-      game.score += 1; // Soft drop score
+      game.score += 1;
       _updateHUD();
     }
   }
@@ -350,7 +334,7 @@
   function _hardDrop() {
     while (!_collide()) {
       _piece.y++;
-      game.score += 2; // Hard drop score
+      game.score += 2;
     }
     _piece.y--;
     _lockPiece();
@@ -359,11 +343,9 @@
   function _rotate() {
     const m = _piece.matrix;
     const N = m.length;
-    const result = [];
-    for (let i = 0; i < N; i++) {
-      result.push(new Array(N).fill(EMPTY));
-    }
-    // Transpose & Reverse (90deg clockwise)
+    const result = Array.from({length: N}, () => new Array(N).fill(EMPTY));
+    
+    // Transpose & Reverse
     for (let r = 0; r < N; r++) {
       for (let c = 0; c < N; c++) {
         result[c][N - 1 - r] = m[r][c];
@@ -373,30 +355,31 @@
     const prevMatrix = _piece.matrix;
     _piece.matrix = result;
 
-    // Wall kick simple (try shifting left/right if stuck)
-    let offset = 0;
+    // Robust Wall Kick
+    let kicked = false;
     if (_collide()) {
-      _piece.x++; offset++;
+      _piece.x++; // Try right 1
       if (_collide()) {
-        _piece.x -= 2; offset -= 2;
+        _piece.x -= 2; // Try left 1
         if (_collide()) {
-          // Revert if kicks fail
-          _piece.x -= offset;
-          _piece.matrix = prevMatrix;
-          return;
+          _piece.x++; 
+          _piece.y--; // Try up 1 (Floor kick)
+          if (_collide()) {
+            _piece.y++; 
+            _piece.matrix = prevMatrix; // Abandon
+            kicked = true;
+          }
         }
       }
     }
-    SoundManager.buttonPress(); // Rotate sound
+    if (!kicked) SoundManager.buttonPress();
   }
 
   function _lockPiece() {
-    const m = _piece.matrix;
-    for (let r = 0; r < m.length; r++) {
-      for (let c = 0; c < m[r].length; c++) {
-        if (m[r][c] !== EMPTY) {
+    for (let r = 0; r < _piece.matrix.length; r++) {
+      for (let c = 0; c < _piece.matrix[r].length; c++) {
+        if (_piece.matrix[r][c] !== EMPTY) {
           const y = _piece.y + r;
-          // Game Over check
           if (y < 0) {
             _triggerGameOver();
             return;
@@ -405,60 +388,44 @@
         }
       }
     }
-    SoundManager.click(); // Lock sound
+    SoundManager.click();
     _clearLines();
     
-    // Spawn next
     _piece = _nextPiece;
     _nextPiece = _randomPiece();
     game.lastDropTime = Date.now();
 
-    // Instant game over if new piece spawns collided
-    if (_collide()) {
-      _triggerGameOver();
-    }
+    if (_collide()) _triggerGameOver();
   }
 
   function _clearLines() {
-    let linesClearedThisTurn = 0;
-    
-    for (let r = ROWS - 1; r >= 0; r--) {
-      let isFull = true;
-      for (let c = 0; c < COLS; c++) {
-        if (_board[r][c] === EMPTY) {
-          isFull = false;
-          break;
-        }
-      }
-      
-      if (isFull) {
-        linesClearedThisTurn++;
-        // Remove row and add empty at top
-        _board.splice(r, 1);
-        _board.unshift(new Array(COLS).fill(EMPTY));
-        r++; // Check same index again
-        
-        // Spawn particles across the cleared line
-        _spawnLineParticles(r);
-      }
-    }
+    // 100% bug-free line clearing using Array filter
+    const newBoard = _board.filter(row => row.some(cell => cell === EMPTY));
+    const linesCleared = ROWS - newBoard.length;
 
-    if (linesClearedThisTurn > 0) {
-      SoundManager.correct(); // Line clear sound
-      
-      // Scoring: classic multiplier
-      const lineMultipliers = [0, 100, 300, 500, 800];
-      game.score += lineMultipliers[linesClearedThisTurn] * game.level;
-      game.lines += linesClearedThisTurn;
+    if (linesCleared > 0) {
+      // Spawn particles at cleared heights
+      for (let r = 0; r < ROWS; r++) {
+        if (!_board[r].some(cell => cell === EMPTY)) _spawnLineParticles(r);
+      }
 
-      // Level up every 10 lines
+      // Add empty rows to top
+      for (let i = 0; i < linesCleared; i++) {
+        newBoard.unshift(new Array(COLS).fill(EMPTY));
+      }
+      _board = newBoard;
+
+      SoundManager.correct();
+      const multipliers = [0, 100, 300, 500, 800];
+      game.score += multipliers[linesCleared] * game.level;
+      game.lines += linesCleared;
+
       if (Math.floor(game.lines / 10) + 1 > game.level) {
         game.level++;
         game.dropInterval = Math.max(100, 1000 - ((game.level - 1) * 100));
-        SoundManager.win(); // Level up sound
+        SoundManager.win();
         App.showToast(`LEVEL ${game.level}!`, 'success', 1500);
       }
-      
       _updateHUD();
     }
   }
@@ -467,37 +434,30 @@
     const y = _boardY + (row * _cellSize) + (_cellSize / 2);
     for (let c = 0; c < COLS; c++) {
       const x = _boardX + (c * _cellSize) + (_cellSize / 2);
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 4; i++) {
         _particles.push({
-          x: x, y: y,
-          vx: (Math.random() - 0.5) * 10,
-          vy: (Math.random() - 0.5) * 10,
-          life: 30, maxLife: 30,
-          color: '#ffffff'
+          x, y,
+          vx: (Math.random() - 0.5) * 12, vy: (Math.random() - 0.5) * 12,
+          life: 30, maxLife: 30, color: '#ffffff'
         });
       }
     }
   }
 
   // ==============================================================================
-  // 8. GAME OVER FLOW & HUD
+  // 8. GAME OVER & HUD
   // ==============================================================================
   function _triggerGameOver() {
     if (_gameOverPending) return;
     _gameOverPending = true;
     game.running = false;
-
     SoundManager.gameOver();
 
-    // Save high score
-    if (game.score > game.highScore) {
-      game.highScore = game.score;
-      const isNewBest = ScoreManager.submitScore('block-drop', game.score);
-      if (isNewBest) SoundManager.newBest();
-    }
+    const isNewBest = ScoreManager.submitScore('block-drop', game.score);
+    if (isNewBest) SoundManager.newBest();
     _updateHUD();
 
-    // Death animation cascade
+    // Red cascade animation
     let r = ROWS - 1;
     const interval = setInterval(() => {
       if (r < 0) {
@@ -512,17 +472,14 @@
         if(_board[r][c] !== EMPTY) _board[r][c] = 7; // turn red
       }
       r--;
-    }, 40);
+    }, 30);
   }
 
   function _updateHUD() {
-    // Platform sync (Rule 4)
     App.updateScoreDisplay(game.score, ScoreManager.getBestScore('block-drop'));
-    
-    // Local Canvas HUD
     _hudEl.innerHTML = `
-      <div>LINES: <span style="color:#fff">${game.lines}</span></div>
-      <div style="font-size:16px; margin-top:5px; color:var(--text2)">LVL: ${game.level}</div>
+      <div style="font-size:24px; font-weight:bold; color:var(--primary, #0ff)">${game.score}</div>
+      <div style="font-size:14px; color:#aaa">LINES: ${game.lines} | LVL: ${game.level}</div>
     `;
   }
 
@@ -533,20 +490,17 @@
     if (game.running) {
       const now = Date.now();
       if (now - game.lastDropTime > game.dropInterval) {
-        _drop();
+        _softDrop();
         game.lastDropTime = now;
       }
     }
 
-    // Particles
     for (let i = _particles.length - 1; i >= 0; i--) {
       const p = _particles[i];
-      p.x += p.vx; p.y += p.vy;
-      p.life--;
+      p.x += p.vx; p.y += p.vy; p.life--;
       if (p.life <= 0) _particles.splice(i, 1);
     }
 
-    // Joystick fade
     if (joystick.active) {
       joystick.opacity = Math.min(1, joystick.opacity + 0.15);
     } else {
@@ -558,17 +512,16 @@
     _ctx.fillStyle = color;
     _ctx.fillRect(x, y, _cellSize, _cellSize);
     
-    // Bevel effect
-    _ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    _ctx.fillRect(x, y, _cellSize, 4);
-    _ctx.fillRect(x, y, 4, _cellSize);
+    // Gem Bevels
+    _ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    _ctx.fillRect(x, y, _cellSize, 3);
+    _ctx.fillRect(x, y, 3, _cellSize);
     
-    _ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    _ctx.fillRect(x, y + _cellSize - 4, _cellSize, 4);
-    _ctx.fillRect(x + _cellSize - 4, y, 4, _cellSize);
+    _ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    _ctx.fillRect(x, y + _cellSize - 3, _cellSize, 3);
+    _ctx.fillRect(x + _cellSize - 3, y, 3, _cellSize);
     
-    // Grid border
-    _ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+    _ctx.strokeStyle = 'rgba(0,0,0,0.8)';
     _ctx.lineWidth = 1;
     _ctx.strokeRect(x, y, _cellSize, _cellSize);
   }
@@ -576,50 +529,49 @@
   function _draw() {
     _ctx.clearRect(0, 0, W(), H());
 
-    // 1. Draw Board Background
-    _ctx.fillStyle = 'var(--bg2, #1a1a2a)';
+    // 1. Board Background
+    _ctx.fillStyle = 'rgba(10, 10, 20, 0.8)';
     _ctx.fillRect(_boardX, _boardY, COLS * _cellSize, ROWS * _cellSize);
-    _ctx.strokeStyle = 'var(--border, #333)';
-    _ctx.lineWidth = 2;
+    _ctx.strokeStyle = 'var(--primary, #0ff)';
+    _ctx.lineWidth = 3;
     _ctx.strokeRect(_boardX - 1, _boardY - 1, (COLS * _cellSize) + 2, (ROWS * _cellSize) + 2);
 
-    // Grid lines
-    _ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    // 2. Grid lines
+    _ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    _ctx.lineWidth = 1;
     _ctx.beginPath();
     for(let r=1; r<ROWS; r++) { _ctx.moveTo(_boardX, _boardY + r*_cellSize); _ctx.lineTo(_boardX + COLS*_cellSize, _boardY + r*_cellSize); }
     for(let c=1; c<COLS; c++) { _ctx.moveTo(_boardX + c*_cellSize, _boardY); _ctx.lineTo(_boardX + c*_cellSize, _boardY + ROWS*_cellSize); }
     _ctx.stroke();
 
-    // 2. Draw Locked Blocks
+    // 3. Locked Blocks
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         if (_board[r][c] !== EMPTY) {
-          const color = SHAPES[_board[r][c]].color;
-          _drawBlock(_boardX + (c * _cellSize), _boardY + (r * _cellSize), color);
+          _drawBlock(_boardX + (c * _cellSize), _boardY + (r * _cellSize), SHAPES[_board[r][c]].color);
         }
       }
     }
 
-    // 3. Draw Ghost Piece & Active Piece
+    // 4. Ghost & Active Piece
     if (game.running && _piece) {
-      // Calculate Ghost Y
       let ghostY = _piece.y;
       while (!_collide({ ..._piece, y: ghostY + 1 })) { ghostY++; }
 
-      const m = _piece.matrix;
-      for (let r = 0; r < m.length; r++) {
-        for (let c = 0; c < m[r].length; c++) {
-          if (m[r][c] !== EMPTY) {
-            // Draw Ghost
+      for (let r = 0; r < _piece.matrix.length; r++) {
+        for (let c = 0; c < _piece.matrix[r].length; c++) {
+          if (_piece.matrix[r][c] !== EMPTY) {
+            // Ghost
             if (ghostY >= 0) {
               const gx = _boardX + ((_piece.x + c) * _cellSize);
               const gy = _boardY + ((ghostY + r) * _cellSize);
-              _ctx.fillStyle = `rgba(255,255,255,0.15)`;
+              _ctx.fillStyle = `rgba(255,255,255,0.1)`;
               _ctx.fillRect(gx, gy, _cellSize, _cellSize);
               _ctx.strokeStyle = _piece.color;
-              _ctx.strokeRect(gx, gy, _cellSize, _cellSize);
+              _ctx.lineWidth = 2;
+              _ctx.strokeRect(gx+1, gy+1, _cellSize-2, _cellSize-2);
             }
-            // Draw Active
+            // Active
             if (_piece.y + r >= 0) {
               _drawBlock(_boardX + ((_piece.x + c) * _cellSize), _boardY + ((_piece.y + r) * _cellSize), _piece.color);
             }
@@ -628,66 +580,65 @@
       }
     }
 
-    // 4. Draw Next Piece Panel
-    const panelX = _boardX + (COLS * _cellSize) + 20;
-    const panelY = _boardY;
-    _ctx.fillStyle = 'var(--text, #fff)';
-    _ctx.font = '14px Orbitron';
-    _ctx.fillText('NEXT:', panelX, panelY);
-    
+    // 5. NEXT Piece Panel (Now at TOP RIGHT)
     if (_nextPiece) {
+      const panelX = W() - 100;
+      const panelY = Math.max(10, _boardY - 70); // Keep above board
+      _ctx.fillStyle = 'var(--text2, #aaa)';
+      _ctx.font = '12px Orbitron';
+      _ctx.fillText('NEXT', panelX, panelY);
+      
       const nm = _nextPiece.matrix;
-      const smallCell = _cellSize * 0.8;
+      const smallCell = 15; // Fixed small size
       for (let r = 0; r < nm.length; r++) {
         for (let c = 0; c < nm[r].length; c++) {
           if (nm[r][c] !== EMPTY) {
-            _drawBlock(panelX + (c * smallCell), panelY + 10 + (r * smallCell), _nextPiece.color);
+            _ctx.fillStyle = _nextPiece.color;
+            _ctx.fillRect(panelX + (c * smallCell), panelY + 10 + (r * smallCell), smallCell, smallCell);
+            _ctx.strokeStyle = '#000';
+            _ctx.lineWidth = 1;
+            _ctx.strokeRect(panelX + (c * smallCell), panelY + 10 + (r * smallCell), smallCell, smallCell);
           }
         }
       }
     }
 
-    // 5. Draw Particles
+    // 6. Particles
     _particles.forEach(p => {
       _ctx.globalAlpha = p.life / p.maxLife;
       _ctx.fillStyle = p.color;
-      _ctx.beginPath();
-      _ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
-      _ctx.fill();
+      _ctx.beginPath(); _ctx.arc(p.x, p.y, 4, 0, Math.PI*2); _ctx.fill();
     });
     _ctx.globalAlpha = 1.0;
 
-    // 6. Draw Mobile Controls
+    // 7. Mobile UI Hints & Joystick
     _jctx.clearRect(0, 0, W(), H());
     if (window.matchMedia('(pointer: coarse)').matches && game.running) {
-      // Draw tap zone hint on right side if joystick is active
+      _jctx.font = 'bold 20px sans-serif';
+      _jctx.fillStyle = 'rgba(255,255,255,0.15)';
+      _jctx.textAlign = 'center';
+      
+      // Tap Zone Hints
       if (joystick.opacity > 0) {
-        _jctx.globalAlpha = joystick.opacity * 0.3;
-        _jctx.fillStyle = '#ffffff';
-        _jctx.font = '24px Orbitron';
-        _jctx.textAlign = 'center';
-        _jctx.fillText('TAP TO ROTATE', W() * 0.75, H() / 2);
+        _jctx.fillText('↻ ROTATE', W() * 0.75, H() * 0.25);
+        _jctx.fillText('⏬ DROP', W() * 0.75, H() * 0.75);
       }
 
-      // Draw Joystick (Rule 20)
+      // Joystick Base
       if (joystick.opacity > 0) {
-        _jctx.globalAlpha = joystick.opacity * 0.4;
-        _jctx.beginPath();
-        _jctx.arc(joystick.baseX, joystick.baseY, joystick.baseRadius, 0, Math.PI * 2);
-        _jctx.fillStyle = '#ffffff';
-        _jctx.fill();
+        _jctx.globalAlpha = joystick.opacity * 0.3;
+        _jctx.beginPath(); _jctx.arc(joystick.baseX, joystick.baseY, joystick.baseRadius, 0, Math.PI * 2);
+        _jctx.fillStyle = '#ffffff'; _jctx.fill();
         
         _jctx.globalAlpha = joystick.opacity * 0.8;
-        _jctx.beginPath();
-        _jctx.arc(joystick.stickX, joystick.stickY, joystick.stickRadius, 0, Math.PI * 2);
-        _jctx.fillStyle = 'var(--primary, #00ffff)';
-        _jctx.fill();
+        _jctx.beginPath(); _jctx.arc(joystick.stickX, joystick.stickY, joystick.stickRadius, 0, Math.PI * 2);
+        _jctx.fillStyle = 'var(--primary, #00ffff)'; _jctx.fill();
       }
     }
   }
 
   // ==============================================================================
-  // 10. RAF LOOP (Rule 11)
+  // 10. RAF LOOP
   // ==============================================================================
   function _startLoop() {
     _running = true;
