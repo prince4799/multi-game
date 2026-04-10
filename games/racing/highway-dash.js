@@ -22,15 +22,14 @@
   // ----------------------------------------------------------------
   let _canvas          = null;
   let _ctx             = null;
-  let _joyCanvas       = null;
-  let _jctx            = null;
   let _animId          = null;
   let _running         = false;
   let _gameOverPending = false;
   let _resizeHandler   = null;
   let _loadingEl       = null;
 
-  let keys = {};
+  // Held-key state — populated by ControlManager events
+  const _held = {};
 
   let playerCarImg = null;
   let enemyCar1Img = null;
@@ -57,18 +56,6 @@
     laneWidth: 0,
     scrollY:   0,
     speed:     BASE_SPEED
-  };
-
-  // ----------------------------------------------------------------
-  //  JOYSTICK
-  // ----------------------------------------------------------------
-  const joystick = {
-    active: false, touchId: null,
-    baseX: 0, baseY: 0,
-    stickX: 0, stickY: 0,
-    dx: 0, dy: 0,
-    baseRadius: 55, stickRadius: 24,
-    maxDist: 50, opacity: 0
   };
 
   // ----------------------------------------------------------------
@@ -106,11 +93,10 @@
   function W() { return _canvas ? _canvas.width  : window.innerWidth;  }
   function H() { return _canvas ? _canvas.height : window.innerHeight; }
 
-  // Car size always derived from lane width — stays proportional
-  function carW()      { return road.laneWidth * 0.62; }
-  function carH()      { return carW() * 1.7;          } // 1:1.7 ratio — compact, not limo
-  function truckW()    { return road.laneWidth * 0.72; }
-  function truckH()    { return truckW() * 1.9;        }
+  function carW()   { return road.laneWidth * 0.62; }
+  function carH()   { return carW() * 1.7;          }
+  function truckW() { return road.laneWidth * 0.72; }
+  function truckH() { return truckW() * 1.9;        }
 
   function laneX(i) {
     return road.x + road.laneWidth * i + road.laneWidth / 2;
@@ -130,14 +116,19 @@
     },
     destroy() {
       _stopLoop();
-      _removeListeners();
+      _detachControls();
+      ControlManager.hideTouchControls();
+      if (_resizeHandler) {
+        window.removeEventListener('resize', _resizeHandler);
+        _resizeHandler = null;
+      }
       game.running     = false;
       _running         = false;
       _gameOverPending = false;
-      [_loadingEl, _joyCanvas, _canvas].forEach(el => {
+      [_loadingEl, _canvas].forEach(el => {
         if (el && el.parentNode) el.parentNode.removeChild(el);
       });
-      _canvas = _ctx = _joyCanvas = _jctx = _loadingEl = null;
+      _canvas = _ctx = _loadingEl = null;
     },
     restart() {
       _hideLoadingOverlay();
@@ -156,8 +147,8 @@
     description: 'Weave through traffic on an endless highway. How far can you go?',
     emoji:       '🚗',
     difficulty:  'medium',
-    controls:    { dpad: false, actions: false, center: false },
-    version:     '1.1',
+    controls:    { dpad: true, actions: false, center: false },
+    version:     '1.2',
     init:        (container) => HighwayDash.start(container),
     destroy:     () => HighwayDash.destroy(),
     restart:     () => HighwayDash.restart()
@@ -259,22 +250,6 @@
     container.appendChild(_canvas);
     _ctx = _canvas.getContext('2d');
 
-    // Joystick canvas
-    _joyCanvas = document.createElement('canvas');
-    Object.assign(_joyCanvas.style, {
-      position:    'absolute', top: '0', left: '0',
-      width:       '100%', height: '100%',
-      zIndex:      '25',
-      touchAction: 'none',
-      display:     'none'
-    });
-    container.appendChild(_joyCanvas);
-    _jctx = _joyCanvas.getContext('2d');
-
-    if (window.matchMedia('(pointer: coarse)').matches) {
-      _joyCanvas.style.display = 'block';
-    }
-
     // HUD
     const hud = document.createElement('div');
     hud.id = 'hd-hud';
@@ -307,7 +282,7 @@
       </span>`;
     container.appendChild(hud);
 
-    // Speed meter — bottom left
+    // Speed meter
     const speedEl = document.createElement('div');
     speedEl.id = 'hd-speed-wrap';
     Object.assign(speedEl.style, {
@@ -337,35 +312,21 @@
     _resizeHandler = () => {
       _resize();
       _initRoadLines();
-      // Recompute player size on resize
-      if (game.running) {
-        player.w = carW();
-        player.h = carH();
-      }
+      if (game.running) { player.w = carW(); player.h = carH(); }
     };
     window.addEventListener('resize', _resizeHandler);
-    _attachListeners();
   }
 
   // ----------------------------------------------------------------
-  //  RESIZE  — key fix: road width responds to actual canvas size
+  //  RESIZE
   // ----------------------------------------------------------------
   function _resize() {
     if (!_canvas) return;
     const p = _canvas.parentElement;
     const w = p ? p.clientWidth  : window.innerWidth;
     const h = p ? p.clientHeight : window.innerHeight;
-
     _canvas.width  = w;
     _canvas.height = h;
-
-    if (_joyCanvas) {
-      _joyCanvas.width  = w;
-      _joyCanvas.height = h;
-    }
-
-    // Road width — narrower on small screens, wider on desktop
-    // Min 260px, max 460px, otherwise 68% of screen
     road.width     = Math.max(260, Math.min(460, w * 0.68));
     road.x         = (w - road.width) / 2;
     road.laneWidth = road.width / LANE_COUNT;
@@ -391,13 +352,14 @@
 
     const total  = assets.length;
     let   loaded = 0;
-
     const onDone = () => {
       loaded++;
       _updateLoadingProgress(loaded, total);
       if (loaded >= total) {
         setTimeout(() => {
           _hideLoadingOverlay();
+          _attachControls();
+          _setupTouchControls();
           _startGame();
         }, 300);
       }
@@ -412,119 +374,99 @@
   }
 
   // ----------------------------------------------------------------
-  //  INPUT LISTENERS
+  //  CONTROL MANAGER INTEGRATION
   // ----------------------------------------------------------------
-  const _onKeyDown = (e) => {
-    keys[e.code] = true;
-    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
-      e.preventDefault();
-    }
-  };
-  const _onKeyUp = (e) => { keys[e.code] = false; };
+  /*
+    Key mapping:
+    ─────────────────────────────────────────────────
+    Desktop keyboard (via ControlManager initKeyboard):
+      ArrowLeft  / KeyA  → move left
+      ArrowRight / KeyD  → move right
 
-  let _mouseJoy = false;
-  const _onMouseMove = (e) => {
-    if (_mouseJoy && joystick.active && _canvas) {
-      const r = _canvas.getBoundingClientRect();
-      _joyMove(e.clientX - r.left, e.clientY - r.top);
-    }
-  };
-  const _onMouseUp = () => {
-    if (_mouseJoy) { _joyEnd(); _mouseJoy = false; }
-  };
-
-  function _attachListeners() {
-    window.addEventListener('keydown',   _onKeyDown);
-    window.addEventListener('keyup',     _onKeyUp);
-    window.addEventListener('mousemove', _onMouseMove);
-    window.addEventListener('mouseup',   _onMouseUp);
-
-    _joyCanvas.addEventListener('touchstart',  _joyTouchStart, { passive: false });
-    _joyCanvas.addEventListener('touchmove',   _joyTouchMove,  { passive: false });
-    _joyCanvas.addEventListener('touchend',    _joyTouchEnd,   { passive: false });
-    _joyCanvas.addEventListener('touchcancel', _joyTouchEnd,   { passive: false });
-
-    _joyCanvas.addEventListener('mousedown', (e) => {
-      if (!_canvas) return;
-      const r = _canvas.getBoundingClientRect();
-      if (_joyStart(e.clientX - r.left, e.clientY - r.top, -1)) {
-        _mouseJoy = true;
-      }
+    Mobile d-pad (your existing HTML buttons):
+      dpad-left  data-key="ArrowLeft"  → move left
+      dpad-right data-key="ArrowRight" → move right
+      dpad-up / dpad-down              → hidden (not needed)
+    ─────────────────────────────────────────────────
+  */
+  function _attachControls() {
+    ControlManager.on('keydown', 'highway-dash', (key) => {
+      _held[key] = true;
+    });
+    ControlManager.on('keyup', 'highway-dash', (key) => {
+      _held[key] = false;
     });
   }
 
-  function _removeListeners() {
-    window.removeEventListener('keydown',   _onKeyDown);
-    window.removeEventListener('keyup',     _onKeyUp);
-    window.removeEventListener('mousemove', _onMouseMove);
-    window.removeEventListener('mouseup',   _onMouseUp);
-    if (_resizeHandler) {
-      window.removeEventListener('resize', _resizeHandler);
-      _resizeHandler = null;
-    }
-    keys = {};
+  function _detachControls() {
+    ControlManager.off('keydown', 'highway-dash');
+    ControlManager.off('keyup',   'highway-dash');
+    ControlManager.clearKeys();
+    Object.keys(_held).forEach(k => { _held[k] = false; });
   }
 
   // ----------------------------------------------------------------
-  //  JOYSTICK
+  //  TOUCH CONTROLS SETUP
   // ----------------------------------------------------------------
-  const _joyTouchStart = (e) => {
-    e.preventDefault();
-    if (!_canvas) return;
-    const r = _canvas.getBoundingClientRect();
-    for (const t of e.changedTouches) {
-      _joyStart(t.clientX - r.left, t.clientY - r.top, t.identifier);
-    }
-  };
-  const _joyTouchMove = (e) => {
-    e.preventDefault();
-    if (!_canvas) return;
-    const r = _canvas.getBoundingClientRect();
-    for (const t of e.changedTouches) {
-      if (joystick.active && t.identifier === joystick.touchId) {
-        _joyMove(t.clientX - r.left, t.clientY - r.top);
-      }
-    }
-  };
-  const _joyTouchEnd = (e) => {
-    e.preventDefault();
-    for (const t of e.changedTouches) {
-      if (joystick.active && t.identifier === joystick.touchId) _joyEnd();
-    }
-  };
-
-  function _joyStart(x, y, id) {
-    joystick.active  = true;
-    joystick.touchId = id;
-    joystick.baseX   = x; joystick.baseY  = y;
-    joystick.stickX  = x; joystick.stickY = y;
-    joystick.dx      = 0; joystick.dy     = 0;
-    joystick.opacity = 1;
-    return true;
-  }
-  function _joyMove(x, y) {
-    if (!joystick.active) return;
-    let dx   = x - joystick.baseX;
-    let dy   = y - joystick.baseY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist > joystick.maxDist) {
-      dx = (dx / dist) * joystick.maxDist;
-      dy = (dy / dist) * joystick.maxDist;
-    }
-    joystick.stickX = joystick.baseX + dx;
-    joystick.stickY = joystick.baseY + dy;
-    joystick.dx     = dx / joystick.maxDist;
-    joystick.dy     = dy / joystick.maxDist;
-  }
-  function _joyEnd() {
-    joystick.active  = false;
-    joystick.touchId = null;
-    joystick.dx      = 0;
-    joystick.dy      = 0;
+  function _setupTouchControls() {
+    /*
+      Highway Dash only needs left / right — we show the dpad but
+      hide the up/down buttons so the layout stays clean.
+      Action buttons are hidden entirely.
+    */
+    ControlManager.showTouchControls({
+      dpad:    true,
+      actions: false,
+      center:  false
+    });
+    _relabelDpad();
+    _hideDpadVertical();
   }
 
+  function _relabelDpad() {
+    // Relabel left/right with context-appropriate icons
+    const map = {
+      'ArrowLeft':  { icon: '◀', sub: 'Left'  },
+      'ArrowRight': { icon: '▶', sub: 'Right' }
+    };
+    Object.entries(map).forEach(([key, { icon, sub }]) => {
+      document.querySelectorAll(`.dpad-btn[data-key="${key}"]`).forEach(btn => {
+        btn.innerHTML = `
+          <span style="display:block;font-size:1.2em;line-height:1">${icon}</span>
+          <span style="display:block;font-size:clamp(7px,1.5vw,9px);
+            opacity:0.55;font-family:'Rajdhani',sans-serif">${sub}</span>`;
+      });
+    });
+  }
+
+  function _hideDpadVertical() {
+    // Hide up/down dpad buttons — not used in this game
+    ['dpad-up', 'dpad-down'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.style.visibility = 'hidden';
+    });
+  }
+
+  function _restoreButtonLabels() {
+    // Restore original FA icons from index.html
+    const orig = {
+      'ArrowLeft':  '<i class="fas fa-chevron-left"></i>',
+      'ArrowRight': '<i class="fas fa-chevron-right"></i>'
+    };
+    Object.entries(orig).forEach(([key, html]) => {
+      document.querySelectorAll(`.dpad-btn[data-key="${key}"]`).forEach(btn => {
+        btn.innerHTML = html;
+      });
+    });
+    // Restore up/down visibility
+    ['dpad-up', 'dpad-down'].forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.style.visibility = '';
+    });
+  }
+
   // ----------------------------------------------------------------
-  //  ROAD LINES INIT
+  //  ROAD LINES
   // ----------------------------------------------------------------
   function _initRoadLines() {
     roadLines = [];
@@ -552,22 +494,21 @@
     const rw  = road.width;
     const lw  = road.laneWidth;
 
-    // ---- Grass sides ----
+    // Grass sides
     ctx.fillStyle = '#1e3a1e';
     ctx.fillRect(0, 0, rx, H());
     ctx.fillRect(rx + rw, 0, W() - (rx + rw), H());
 
-    // Grass texture stripes
     ctx.save();
     ctx.globalAlpha = 0.15;
     ctx.fillStyle   = '#2d5a2d';
     for (let gy = 0; gy < H(); gy += 24) {
-      ctx.fillRect(0,       gy,      rx,             12);
-      ctx.fillRect(rx + rw, gy, W() - (rx + rw),    12);
+      ctx.fillRect(0,       gy, rx,             12);
+      ctx.fillRect(rx + rw, gy, W()-(rx+rw),    12);
     }
     ctx.restore();
 
-    // ---- Road base ----
+    // Road base
     const roadGrad = ctx.createLinearGradient(rx, 0, rx + rw, 0);
     roadGrad.addColorStop(0,    '#282828');
     roadGrad.addColorStop(0.08, '#323232');
@@ -577,7 +518,7 @@
     ctx.fillStyle = roadGrad;
     ctx.fillRect(rx, 0, rw, H());
 
-    // ---- White edge lines ----
+    // White edge lines
     ctx.save();
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth   = Math.max(2, rw * 0.008);
@@ -586,46 +527,42 @@
     ctx.beginPath(); ctx.moveTo(rx + rw, 0); ctx.lineTo(rx + rw, H()); ctx.stroke();
     ctx.restore();
 
-    // ---- Yellow shoulder lines ----
+    // Yellow shoulder lines
     ctx.save();
     ctx.strokeStyle = '#ffcc00';
     ctx.lineWidth   = Math.max(2, rw * 0.006);
     ctx.globalAlpha = 0.75;
     const inset = rw * 0.022;
     ctx.beginPath(); ctx.moveTo(rx + inset, 0);      ctx.lineTo(rx + inset, H());      ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(rx + rw - inset, 0); ctx.lineTo(rx + rw - inset, H()); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(rx+rw-inset, 0); ctx.lineTo(rx+rw-inset, H()); ctx.stroke();
     ctx.restore();
 
-    // ---- Dashed lane dividers ----
+    // Dashed lane dividers
     ctx.save();
     ctx.strokeStyle = 'rgba(255,255,255,0.5)';
     ctx.lineWidth   = Math.max(1.5, rw * 0.005);
-
     const lineH   = roadLines[0] ? roadLines[0].h   : 40;
     const lineGap = roadLines[0] ? roadLines[0].gap  : 28;
     const cycle   = lineH + lineGap;
-
     for (let lane = 1; lane < LANE_COUNT; lane++) {
       const lx = rx + lw * lane;
       for (let rl of roadLines) {
         const y = (rl.y + road.scrollY) % (H() + cycle) - lineH;
         ctx.beginPath();
-        ctx.moveTo(lx, y);
-        ctx.lineTo(lx, y + rl.h);
-        ctx.stroke();
+        ctx.moveTo(lx, y); ctx.lineTo(lx, y + rl.h); ctx.stroke();
       }
     }
     ctx.restore();
 
-    // ---- Speed shimmer ----
+    // Speed shimmer
     const sr = Math.min(1, (game.speed - BASE_SPEED) / (MAX_SPEED - BASE_SPEED));
     if (sr > 0.3) {
       ctx.save();
       ctx.globalAlpha = sr * 0.1;
       const sh = ctx.createLinearGradient(rx, 0, rx + rw, 0);
-      sh.addColorStop(0,   'transparent');
+      sh.addColorStop(0, 'transparent');
       sh.addColorStop(0.5, '#ff9500');
-      sh.addColorStop(1,   'transparent');
+      sh.addColorStop(1, 'transparent');
       ctx.fillStyle = sh;
       ctx.fillRect(rx, 0, rw, H());
       ctx.restore();
@@ -645,16 +582,11 @@
   }
 
   function _updatePlayer() {
+    // Read from _held — works for both keyboard and dpad touch
     let inputDx = 0;
+    if (_held['ArrowLeft']  || _held['KeyA']) inputDx = -1;
+    if (_held['ArrowRight'] || _held['KeyD']) inputDx =  1;
 
-    if (keys['ArrowLeft']  || keys['KeyA']) inputDx = -1;
-    if (keys['ArrowRight'] || keys['KeyD']) inputDx =  1;
-
-    if (joystick.active && Math.abs(joystick.dx) > 0.2) {
-      inputDx = joystick.dx;
-    }
-
-    // Horizontal movement — speed scales with lane width
     const moveSpd = road.laneWidth * 0.14;
     player.x += inputDx * moveSpd;
 
@@ -707,10 +639,9 @@
   }
 
   // ----------------------------------------------------------------
-  //  FALLBACK VECTOR CAR  — compact, proportional
+  //  FALLBACK VECTOR CAR
   // ----------------------------------------------------------------
   function _drawCarFallback(ctx, cx, cy, w, h, bodyCol, darkCol, isPlayer) {
-    // Drop shadow
     ctx.save();
     ctx.globalAlpha = 0.25;
     ctx.fillStyle   = '#000';
@@ -719,86 +650,52 @@
     ctx.fill();
     ctx.restore();
 
-    // Body
     ctx.fillStyle = bodyCol;
     ctx.beginPath();
-    ctx.roundRect(cx - w / 2, cy - h / 2, w, h,
-      [w * 0.22, w * 0.22, w * 0.14, w * 0.14]);
+    ctx.roundRect(cx - w/2, cy - h/2, w, h, [w*0.22, w*0.22, w*0.14, w*0.14]);
     ctx.fill();
 
-    // Roof / cabin (darker band)
     ctx.fillStyle = darkCol;
     ctx.beginPath();
-    ctx.roundRect(
-      cx - w * 0.38, cy - h * 0.28,
-      w * 0.76,      h * 0.34, 5);
+    ctx.roundRect(cx - w*0.38, cy - h*0.28, w*0.76, h*0.34, 5);
     ctx.fill();
 
-    // Windshield
-    ctx.fillStyle = isPlayer
-      ? 'rgba(160,220,255,0.75)'
-      : 'rgba(255,140,140,0.75)';
+    ctx.fillStyle = isPlayer ? 'rgba(160,220,255,0.75)' : 'rgba(255,140,140,0.75)';
     ctx.beginPath();
-    ctx.roundRect(
-      cx - w * 0.30, cy - h * 0.26,
-      w * 0.60,      h * 0.18, 4);
+    ctx.roundRect(cx - w*0.30, cy - h*0.26, w*0.60, h*0.18, 4);
     ctx.fill();
 
-    // Rear window
-    ctx.fillStyle = isPlayer
-      ? 'rgba(120,190,230,0.55)'
-      : 'rgba(220,110,110,0.55)';
+    ctx.fillStyle = isPlayer ? 'rgba(120,190,230,0.55)' : 'rgba(220,110,110,0.55)';
     ctx.beginPath();
-    ctx.roundRect(
-      cx - w * 0.26, cy + h * 0.06,
-      w * 0.52,      h * 0.14, 4);
+    ctx.roundRect(cx - w*0.26, cy + h*0.06, w*0.52, h*0.14, 4);
     ctx.fill();
 
-    // Headlights
     const hlCol = isPlayer ? '#ffffff' : '#ff4444';
-    ctx.fillStyle  = hlCol;
+    ctx.fillStyle   = hlCol;
     ctx.shadowColor = hlCol;
     ctx.shadowBlur  = 8;
-    const hlY  = cy - h * 0.43;
-    const hlOX = w * 0.27;
-    const hlW  = w * 0.13, hlH = h * 0.05;
-    ctx.beginPath();
-    ctx.ellipse(cx - hlOX, hlY, hlW, hlH, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(cx + hlOX, hlY, hlW, hlH, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const hlY = cy - h*0.43, hlOX = w*0.27, hlW = w*0.13, hlH = h*0.05;
+    ctx.beginPath(); ctx.ellipse(cx - hlOX, hlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx + hlOX, hlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Taillights
     const tlCol = isPlayer ? '#ff2222' : '#ffffff';
     ctx.fillStyle   = tlCol;
     ctx.shadowColor = tlCol;
     ctx.shadowBlur  = 6;
-    const tlY  = cy + h * 0.43;
-    ctx.beginPath();
-    ctx.ellipse(cx - hlOX, tlY, hlW, hlH, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(cx + hlOX, tlY, hlW, hlH, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const tlY = cy + h*0.43;
+    ctx.beginPath(); ctx.ellipse(cx - hlOX, tlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx + hlOX, tlY, hlW, hlH, 0, 0, Math.PI*2); ctx.fill();
     ctx.shadowBlur = 0;
 
-    // Wheels — 4 corners
-    const wy  = h * 0.34;
-    const wx  = w * 0.50;
-    const wrx = w * 0.13;
-    const wry = h * 0.09;
+    const wy = h*0.34, wx = w*0.50, wrx = w*0.13, wry = h*0.09;
     ctx.fillStyle = '#111';
-    [[-wx, -wy], [wx, -wy], [-wx, wy], [wx, wy]].forEach(([ox, oy]) => {
+    [[-wx,-wy],[wx,-wy],[-wx,wy],[wx,wy]].forEach(([ox,oy]) => {
       ctx.beginPath();
-      ctx.ellipse(cx + ox, cy + oy, wrx, wry, 0, 0, Math.PI * 2);
-      ctx.fill();
-      // Rim highlight
+      ctx.ellipse(cx+ox, cy+oy, wrx, wry, 0, 0, Math.PI*2); ctx.fill();
       ctx.fillStyle = '#444';
       ctx.beginPath();
-      ctx.ellipse(cx + ox, cy + oy, wrx * 0.5, wry * 0.5, 0, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.ellipse(cx+ox, cy+oy, wrx*0.5, wry*0.5, 0, 0, Math.PI*2); ctx.fill();
       ctx.fillStyle = '#111';
     });
   }
@@ -807,12 +704,9 @@
   //  ENEMIES
   // ----------------------------------------------------------------
   const ENEMY_COLORS = [
-    ['#e03030', '#991818'],
-    ['#30c030', '#186018'],
-    ['#e0c030', '#907018'],
-    ['#c030c0', '#601860'],
-    ['#30c0c0', '#186060'],
-    ['#e07030', '#904018']
+    ['#e03030','#991818'], ['#30c030','#186018'],
+    ['#e0c030','#907018'], ['#c030c0','#601860'],
+    ['#30c0c0','#186060'], ['#e07030','#904018']
   ];
 
   function _spawnEnemy() {
@@ -821,34 +715,26 @@
     const isTruck   = Math.random() > 0.72;
     const ew        = isTruck ? truckW() : carW();
     const eh        = isTruck ? truckH() : carH();
-
     enemies.push({
-      x:      laneX(lane),
-      y:      -eh - 20,
-      w:      ew,
-      h:      eh,
-      lane,
-      speed:  game.speed * (0.28 + Math.random() * 0.32),
-      color:  colorPair[0],
-      dark:   colorPair[1],
-      isTruck,
-      img:    isTruck ? enemyCar2Img : enemyCar1Img
+      x: laneX(lane), y: -eh - 20, w: ew, h: eh, lane,
+      speed:   game.speed * (0.28 + Math.random() * 0.32),
+      color:   colorPair[0], dark: colorPair[1], isTruck,
+      img:     isTruck ? enemyCar2Img : enemyCar1Img
     });
   }
 
   function _updateEnemies() {
     enemies.forEach(e => { e.y += e.speed; });
-    enemies = enemies.filter(e => e.y - e.h / 2 < H() + 100);
+    enemies = enemies.filter(e => e.y - e.h/2 < H() + 100);
   }
 
   function _drawEnemies() {
     enemies.forEach(e => {
       _ctx.save();
       _ctx.translate(e.x, e.y);
-      _ctx.rotate(Math.PI); // face toward player
-
+      _ctx.rotate(Math.PI);
       if (imgOk(e.img)) {
-        _ctx.drawImage(e.img, -e.w / 2, -e.h / 2, e.w, e.h);
+        _ctx.drawImage(e.img, -e.w/2, -e.h/2, e.w, e.h);
       } else {
         _drawCarFallback(_ctx, 0, 0, e.w, e.h, e.color, e.dark, false);
       }
@@ -862,12 +748,9 @@
   function _spawnCoin() {
     const r = Math.max(10, road.laneWidth * 0.18);
     coins.push({
-      x:     laneX(randInt(0, LANE_COUNT - 1)),
-      y:     -r - 10,
-      r,
-      speed: game.speed * 0.52,
-      angle: 0,
-      glow:  Math.random() * Math.PI * 2
+      x: laneX(randInt(0, LANE_COUNT-1)), y: -r - 10, r,
+      speed: game.speed * 0.52, angle: 0,
+      glow: Math.random() * Math.PI * 2
     });
   }
 
@@ -886,23 +769,16 @@
       if (imgOk(coinImg)) {
         _ctx.rotate(c.angle);
         const s = c.r * 2.2;
-        _ctx.drawImage(coinImg, -s / 2, -s / 2, s, s);
+        _ctx.drawImage(coinImg, -s/2, -s/2, s, s);
       } else {
-        // Coin circle
-        const g = _ctx.createRadialGradient(-c.r * 0.2, -c.r * 0.2, 1, 0, 0, c.r);
-        g.addColorStop(0, '#ffe566');
-        g.addColorStop(0.7, '#ffd700');
-        g.addColorStop(1, '#b8860b');
-        _ctx.beginPath();
-        _ctx.arc(0, 0, c.r, 0, Math.PI * 2);
-        _ctx.fillStyle = g;
-        _ctx.fill();
-        // $ label
+        const g = _ctx.createRadialGradient(-c.r*0.2, -c.r*0.2, 1, 0, 0, c.r);
+        g.addColorStop(0, '#ffe566'); g.addColorStop(0.7, '#ffd700'); g.addColorStop(1, '#b8860b');
+        _ctx.beginPath(); _ctx.arc(0, 0, c.r, 0, Math.PI*2);
+        _ctx.fillStyle = g; _ctx.fill();
         _ctx.shadowBlur   = 0;
         _ctx.fillStyle    = 'rgba(120,80,0,0.8)';
-        _ctx.font         = `bold ${Math.round(c.r * 1.1)}px sans-serif`;
-        _ctx.textAlign    = 'center';
-        _ctx.textBaseline = 'middle';
+        _ctx.font         = `bold ${Math.round(c.r*1.1)}px sans-serif`;
+        _ctx.textAlign    = 'center'; _ctx.textBaseline = 'middle';
         _ctx.fillText('$', 0, 1);
       }
       _ctx.shadowBlur = 0;
@@ -929,16 +805,14 @@
       _ctx.save();
       _ctx.globalAlpha = Math.max(0, a);
       if (imgOk(explosionImg)) {
-        _ctx.drawImage(explosionImg, e.x - s / 2, e.y - s / 2, s, s);
+        _ctx.drawImage(explosionImg, e.x - s/2, e.y - s/2, s, s);
       } else {
-        const gr = _ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, s / 2);
+        const gr = _ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, s/2);
         gr.addColorStop(0,   'rgba(255,220,50,0.95)');
         gr.addColorStop(0.4, 'rgba(255,100,0,0.7)');
         gr.addColorStop(1,   'rgba(100,0,0,0)');
         _ctx.fillStyle = gr;
-        _ctx.beginPath();
-        _ctx.arc(e.x, e.y, s / 2, 0, Math.PI * 2);
-        _ctx.fill();
+        _ctx.beginPath(); _ctx.arc(e.x, e.y, s/2, 0, Math.PI*2); _ctx.fill();
       }
       _ctx.globalAlpha = 1;
       _ctx.restore();
@@ -954,12 +828,9 @@
       const spd = 0.5 + Math.random() * spread;
       particles.push({
         x, y,
-        vx: Math.cos(ang) * spd,
-        vy: Math.sin(ang) * spd,
-        life: 25 + Math.random() * 20,
-        maxLife: 45,
-        r: 1.5 + Math.random() * 3,
-        color
+        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+        life: 25 + Math.random() * 20, maxLife: 45,
+        r: 1.5 + Math.random() * 3, color
       });
     }
     if (particles.length > 200) particles.splice(0, particles.length - 200);
@@ -967,8 +838,7 @@
 
   function _spawnScorePopup(x, y, text) {
     particles.push({
-      x, y, vx: 0, vy: -1.5,
-      life: 55, maxLife: 55,
+      x, y, vx: 0, vy: -1.5, life: 55, maxLife: 55,
       r: 0, color: '#fff', text
     });
   }
@@ -984,15 +854,15 @@
       _ctx.save();
       _ctx.globalAlpha = a;
       if (p.text) {
-        _ctx.fillStyle    = 'gold';
-        _ctx.font         = `bold ${Math.max(12, road.laneWidth * 0.15)}px sans-serif`;
-        _ctx.textAlign    = 'center';
-        _ctx.shadowColor  = 'rgba(255,200,0,0.8)';
-        _ctx.shadowBlur   = 8;
+        _ctx.fillStyle   = 'gold';
+        _ctx.font        = `bold ${Math.max(12, road.laneWidth * 0.15)}px sans-serif`;
+        _ctx.textAlign   = 'center';
+        _ctx.shadowColor = 'rgba(255,200,0,0.8)';
+        _ctx.shadowBlur  = 8;
         _ctx.fillText(p.text, p.x, p.y);
       } else {
         _ctx.beginPath();
-        _ctx.arc(p.x, p.y, p.r * a, 0, Math.PI * 2);
+        _ctx.arc(p.x, p.y, p.r * a, 0, Math.PI*2);
         _ctx.fillStyle = p.color;
         _ctx.fill();
       }
@@ -1004,19 +874,17 @@
   //  COLLISION HELPERS
   // ----------------------------------------------------------------
   function _rectOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
-    // 0.62 forgiveness factor — feels fair, not cheap
     const f = 0.62;
     return (
       Math.abs(ax - bx) < (aw + bw) / 2 * f &&
       Math.abs(ay - by) < (ah + bh) / 2 * f
     );
   }
-
   function _circleRect(cx, cy, cr, rx, ry, rw, rh) {
-    const nx = Math.max(rx - rw / 2, Math.min(cx, rx + rw / 2));
-    const ny = Math.max(ry - rh / 2, Math.min(cy, ry + rh / 2));
+    const nx = Math.max(rx - rw/2, Math.min(cx, rx + rw/2));
+    const ny = Math.max(ry - rh/2, Math.min(cy, ry + rh/2));
     const dx = cx - nx, dy = cy - ny;
-    return dx * dx + dy * dy < (cr + 8) * (cr + 8);
+    return dx*dx + dy*dy < (cr + 8) * (cr + 8);
   }
 
   // ----------------------------------------------------------------
@@ -1033,8 +901,8 @@
 
     if (speedEl) {
       const kmh = Math.round((game.speed / BASE_SPEED) * 60);
-      speedEl.textContent   = kmh;
-      speedEl.style.color   = game.speed > MAX_SPEED * 0.75 ? '#ff3300' : '#ff9500';
+      speedEl.textContent      = kmh;
+      speedEl.style.color      = game.speed > MAX_SPEED * 0.75 ? '#ff3300' : '#ff9500';
       speedEl.style.textShadow = `0 0 12px ${game.speed > MAX_SPEED * 0.75 ? '#ff3300' : '#ff9500'}`;
     }
 
@@ -1048,6 +916,7 @@
     const gb = document.getElementById('game-best-display');
     if (gs) gs.textContent = game.score;
     if (gb) gb.textContent = game.highScore;
+    App.updateScoreDisplay(game.score, ScoreManager.getBestScore('highway-dash'));
   }
 
   // ----------------------------------------------------------------
@@ -1056,11 +925,11 @@
   const _milestones = new Set();
   function _checkMilestone() {
     const d = Math.floor(game.distance);
-    [100, 250, 500, 750, 1000, 1500, 2000, 3000, 5000].forEach(m => {
+    [100,250,500,750,1000,1500,2000,3000,5000].forEach(m => {
       if (d >= m && !_milestones.has(m)) {
         _milestones.add(m);
         App.showToast(`🏁 ${m}m reached!`, 'success', 1800);
-        _spawnScorePopup(W() / 2, H() / 2 - 30, `${m}M!`);
+        _spawnScorePopup(W()/2, H()/2 - 30, `${m}M!`);
       }
     });
   }
@@ -1087,12 +956,15 @@
     particles  = [];
     explosions = [];
     timers     = { enemy: 60, coin: 140 };
-    keys       = {};
     _milestones.clear();
+
+    // Clear all held keys
+    Object.keys(_held).forEach(k => { _held[k] = false; });
 
     _initRoadLines();
     _resetPlayer();
     _updateHUD();
+    SoundManager.gameStart();
     _startLoop();
   }
 
@@ -1111,6 +983,7 @@
     _spawnExplosion(player.x, player.y, player.h * 1.2);
     _spawnParticles(player.x, player.y, '#ff4444', 22, 5);
     if (ex !== undefined) _spawnParticles(ex, ey, '#ff8800', 14, 4);
+    SoundManager.wrong();
     _updateHUD();
 
     if (game.lives <= 0) {
@@ -1132,8 +1005,10 @@
     if (game.score > game.highScore) {
       game.highScore = game.score;
       localStorage.setItem('hd_hi', game.highScore);
+      App.showToast('🏆 New Best Score!', 'success', 2000);
     }
 
+    ScoreManager.submitScore('highway-dash', game.score);
     _updateHUD();
 
     setTimeout(() => {
@@ -1143,51 +1018,7 @@
   }
 
   // ----------------------------------------------------------------
-  //  JOYSTICK DRAW
-  // ----------------------------------------------------------------
-  function _drawJoystick() {
-    if (!_jctx) return;
-    _jctx.clearRect(0, 0, _joyCanvas.width, _joyCanvas.height);
-
-    joystick.opacity = joystick.active
-      ? Math.min(1,  joystick.opacity + 0.15)
-      : Math.max(0,  joystick.opacity - 0.08);
-
-    if (joystick.opacity <= 0.01) return;
-
-    const a = joystick.opacity;
-    _jctx.save();
-
-    _jctx.globalAlpha = a * 0.22;
-    _jctx.beginPath();
-    _jctx.arc(joystick.baseX, joystick.baseY, joystick.baseRadius, 0, Math.PI * 2);
-    _jctx.fillStyle = '#fff';
-    _jctx.fill();
-    _jctx.globalAlpha = a * 0.45;
-    _jctx.strokeStyle = '#ff9500';
-    _jctx.lineWidth   = 2.5;
-    _jctx.stroke();
-
-    const sx = joystick.active ? joystick.stickX : joystick.baseX;
-    const sy = joystick.active ? joystick.stickY : joystick.baseY;
-    _jctx.globalAlpha = a * 0.75;
-    const sg = _jctx.createRadialGradient(sx - 4, sy - 4, 2, sx, sy, joystick.stickRadius);
-    sg.addColorStop(0, '#ffcc66');
-    sg.addColorStop(1, '#cc6600');
-    _jctx.beginPath();
-    _jctx.arc(sx, sy, joystick.stickRadius, 0, Math.PI * 2);
-    _jctx.fillStyle = sg;
-    _jctx.fill();
-    _jctx.globalAlpha = a * 0.9;
-    _jctx.strokeStyle = '#ff9500';
-    _jctx.lineWidth   = 2;
-    _jctx.stroke();
-
-    _jctx.restore();
-  }
-
-  // ----------------------------------------------------------------
-  //  SPEED LINES (high speed visual)
+  //  SPEED LINES
   // ----------------------------------------------------------------
   function _drawSpeedLines() {
     const sr = Math.min(1, (game.speed - BASE_SPEED) / (MAX_SPEED - BASE_SPEED));
@@ -1201,10 +1032,7 @@
       const x   = road.x + Math.random() * road.width;
       const y   = Math.random() * H();
       const len = 18 + sr * 55;
-      _ctx.beginPath();
-      _ctx.moveTo(x, y);
-      _ctx.lineTo(x, y + len);
-      _ctx.stroke();
+      _ctx.beginPath(); _ctx.moveTo(x, y); _ctx.lineTo(x, y + len); _ctx.stroke();
     }
     _ctx.restore();
   }
@@ -1221,6 +1049,20 @@
     _ctx.font        = `bold ${Math.max(10, W() * 0.022)}px 'Orbitron', sans-serif`;
     _ctx.textAlign   = 'center';
     _ctx.fillText('⚡ MAX SPEED ⚡', W() / 2, 40);
+    _ctx.restore();
+  }
+
+  // ----------------------------------------------------------------
+  //  DESKTOP KEY HINTS (drawn on canvas)
+  // ----------------------------------------------------------------
+  function _drawKeyHints() {
+    if (ControlManager.isTouchDevice()) return;
+    _ctx.save();
+    _ctx.globalAlpha = 0.35;
+    _ctx.font        = `${Math.max(10, W() * 0.018)}px 'Orbitron', sans-serif`;
+    _ctx.fillStyle   = '#ffffff';
+    _ctx.textAlign   = 'center';
+    _ctx.fillText('← → or A D to steer', W() / 2, H() - 16);
     _ctx.restore();
   }
 
@@ -1243,7 +1085,6 @@
 
     // Distance
     game.distance += game.speed * 0.04;
-
     _checkMilestone();
 
     // Spawn timers
@@ -1283,13 +1124,12 @@
         game.coinBonus += 25;
         _spawnParticles(c.x, c.y, '#ffd700', 10, 3);
         _spawnScorePopup(c.x, c.y - 20, '+25 🪙');
+        SoundManager.correct();
         coins.splice(i, 1);
       }
     }
 
-    // Final score = distance + coin bonus
     game.score = Math.floor(game.distance) + game.coinBonus;
-
     _updateHUD();
 
     if (game.shakeTimer > 0) game.shakeTimer--;
@@ -1300,7 +1140,6 @@
   // ----------------------------------------------------------------
   function _draw() {
     if (!_ctx || !_canvas) return;
-
     _ctx.clearRect(0, 0, W(), H());
 
     const shaking = game.shakeTimer > 0;
@@ -1317,16 +1156,13 @@
     _drawSpeedLines();
     _drawCoins();
     _drawEnemies();
-
     if (game.lives > 0 || player.invincible > 0) _drawPlayer();
-
     _drawExplosions();
     _drawParticles();
     _drawSpeedBanner();
+    _drawKeyHints();
 
     if (shaking) _ctx.restore();
-
-    _drawJoystick();
   }
 
   // ----------------------------------------------------------------
@@ -1345,10 +1181,7 @@
 
   function _stopLoop() {
     _running = false;
-    if (_animId) {
-      cancelAnimationFrame(_animId);
-      _animId = null;
-    }
+    if (_animId) { cancelAnimationFrame(_animId); _animId = null; }
   }
 
 })();
