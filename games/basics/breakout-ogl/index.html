@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Breakout 3D OGL | Premium Arcade</title>
+    <meta name="description" content="A high-performance 3D Brick Breaker built with OGL. Experience neon physics and smooth WebGL action.">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/ogl/dist/ogl.umd.js"></script>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="hud">
+        <div class="hud-card"><span class="label">Score</span><span id="score" class="value">0</span></div>
+        <div class="hud-card"><span class="label">Bricks</span><span id="bricks-count" class="value">0</span></div>
+    </div>
+    <div id="overlay">
+        <div class="menu-card">
+            <h1 id="status-text">Breakout 3D</h1>
+            <p>Shatter the neon grid with ultra-smooth 60FPS motion.</p>
+            <button id="start-btn">Launch Ball</button>
+            <div class="controls-hint">
+                <div class="control-item">
+                    <span class="key">Touch/Mouse</span>
+                    <span class="key">AD Keys</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { Renderer, Camera, Transform, Box, Sphere, Program, Mesh, Color } = ogl;
+
+        const vertex = /* glsl */ `
+            attribute vec3 position;
+            attribute vec3 normal;
+            uniform mat4 modelViewMatrix;
+            uniform mat4 projectionMatrix;
+            uniform mat3 normalMatrix;
+            varying vec3 vNormal;
+            void main() {
+                vNormal = normalize(normalMatrix * normal);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const fragment = /* glsl */ `
+            precision highp float;
+            uniform vec3 uColor;
+            uniform float uHit;
+            varying vec3 vNormal;
+            void main() {
+                float lighting = dot(vNormal, normalize(vec3(0.5, 1.0, 0.5))) * 0.5 + 0.5;
+                float rim = 1.0 - max(0.0, dot(vNormal, vec3(0.0, 0.0, 1.0)));
+                rim = pow(rim, 3.0);
+                vec3 color = mix(uColor, vec3(1.0), uHit * 0.5) * lighting + rim * 0.8;
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        class BreakoutGame {
+            constructor() {
+                this.renderer = new Renderer({ dpr: 2, antialias: true });
+                this.gl = this.renderer.gl;
+                document.getElementById('canvas-container').appendChild(this.gl.canvas);
+
+                this.camera = new Camera(this.gl, { fov: 45 });
+                this.scene = new Transform();
+                this.arenaWidth = 20;
+                this.arenaHeight = 34;
+                this.arenaHalfW = this.arenaWidth / 2;
+                
+                this.score = 0;
+                this.gameStarted = false;
+                this.isGameOver = false;
+
+                this.initGeometries();
+                this.initObjects();
+                
+                window.addEventListener('resize', () => this.resize(), false);
+                this.resize();
+
+                window.addEventListener('mousemove', (e) => this.onInputMove(e.clientX));
+                window.addEventListener('touchstart', (e) => this.onInputMove(e.touches[0].clientX), { passive: true });
+                window.addEventListener('touchmove', (e) => this.onInputMove(e.touches[0].clientX), { passive: true });
+                window.addEventListener('keydown', (e) => this.onKeyDown(e));
+                window.addEventListener('keyup', (e) => this.onKeyUp(e));
+                
+                this.keysHeld = {};
+                this.paddleSpeed = 0.6;
+                this.vPaddle = { x: 0 };
+                requestAnimationFrame((t) => this.update(t));
+            }
+
+            initGeometries() {
+                this.brickGeo = new Box(this.gl, { width: 1.8, height: 0.8, depth: 1 });
+                this.paddleGeo = new Box(this.gl, { width: 5, height: 0.8, depth: 1.5 });
+                this.ballGeo = new Sphere(this.gl, { radius: 0.5, widthSegments: 16 });
+            }
+
+            initObjects() {
+                this.mainProgram = (color) => new Program(this.gl, {
+                    vertex, fragment, uniforms: { uColor: { value: new Color(color) }, uHit: { value: 0 } }
+                });
+                this.paddle = new Mesh(this.gl, { geometry: this.paddleGeo, program: this.mainProgram('#00f2ff') });
+                this.paddle.position.set(0, 0, 14);
+                this.paddle.setParent(this.scene);
+                this.ball = new Mesh(this.gl, { geometry: this.ballGeo, program: this.mainProgram('#ff007a') });
+                this.ball.position.set(0, 0, 10);
+                this.ball.setParent(this.scene);
+                this.ballVel = { x: 0, z: 0 };
+                this.initBricks();
+                const ground = new Mesh(this.gl, { 
+                    geometry: new Box(this.gl, { width: this.arenaWidth, height: 0.1, depth: this.arenaHeight }),
+                    program: new Program(this.gl, { vertex, fragment: `precision highp float; void main() { gl_FragColor = vec4(0.04, 0.04, 0.06, 1.0); }` })
+                });
+                ground.position.y = -0.5; ground.setParent(this.scene);
+            }
+
+            initBricks() {
+                if (this.bricks) this.bricks.forEach(b => b.setParent(null));
+                this.bricks = [];
+                const colors = ['#7000ff', '#00f2ff', '#ff007a', '#00ff70', '#ffcc00'];
+                for (let r = 0; r < 5; r++) {
+                    for (let c = 0; c < 8; c++) {
+                        const brick = new Mesh(this.gl, { geometry: this.brickGeo, program: this.mainProgram(colors[r % colors.length]) });
+                        brick.position.set((c - 3.5) * 2.2, 0, -r * 1.5 - 6);
+                        brick.setParent(this.scene); brick.active = true; this.bricks.push(brick);
+                    }
+                }
+                this.updateBrickCount();
+            }
+
+            onInputMove(clientX) {
+                if (this.isGameOver) return;
+                const x = (clientX / window.innerWidth) * 2 - 1;
+                this.targetPaddleX = x * (this.arenaHalfW - 2.5);
+            }
+
+            onKeyDown(e) {
+                if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') this.keysHeld['left'] = true;
+                if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') this.keysHeld['right'] = true;
+                if (!this.gameStarted && (e.key === 'Enter' || e.key === ' ')) this.start();
+            }
+
+            onKeyUp(e) {
+                if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') this.keysHeld['left'] = false;
+                if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') this.keysHeld['right'] = false;
+            }
+
+            start() {
+                if (this.isGameOver) this.reset();
+                if (this.gameStarted) return;
+                this.gameStarted = true; this.isGameOver = false;
+                this.ballVel = { x: (Math.random() - 0.5) * 0.4, z: 0.45 };
+                document.getElementById('overlay').classList.add('hidden');
+            }
+
+            reset() {
+                this.gameStarted = false; this.isGameOver = false; this.score = 0;
+                this.ball.position.set(0, 0, 10); this.ballVel = { x: 0, z: 0 };
+                this.targetPaddleX = 0; this.vPaddle.x = 0; this.paddle.position.x = 0;
+                this.initBricks(); this.updateScoreUI();
+                document.getElementById('overlay').classList.remove('hidden');
+                document.getElementById('status-text').innerText = 'Breakout 3D';
+            }
+
+            updateScoreUI() { document.getElementById('score').innerText = this.score; }
+            updateBrickCount() {
+                const count = this.bricks.filter(b => b.active).length;
+                document.getElementById('bricks-count').innerText = count;
+                if (count === 0 && this.gameStarted) this.win();
+            }
+
+            win() { this.isGameOver = true; this.gameStarted = false; document.getElementById('overlay').classList.remove('hidden'); document.getElementById('status-text').innerText = 'VICTORY!'; }
+            gameOver() { this.isGameOver = true; this.gameStarted = false; document.getElementById('overlay').classList.remove('hidden'); document.getElementById('status-text').innerText = 'GAME OVER'; }
+
+            resize() { 
+                this.renderer.setSize(window.innerWidth, window.innerHeight); 
+                this.camera.perspective({ aspect: this.gl.canvas.width / this.gl.canvas.height }); 
+                this.isMobile = window.innerWidth < 600;
+            }
+
+            update(t) {
+                requestAnimationFrame((t) => this.update(t));
+                // Process held keys for continuous movement
+                if (this.keysHeld['left']) this.targetPaddleX = (this.targetPaddleX || 0) - this.paddleSpeed;
+                if (this.keysHeld['right']) this.targetPaddleX = (this.targetPaddleX || 0) + this.paddleSpeed;
+
+                if (this.targetPaddleX !== undefined) {
+                    this.targetPaddleX = Math.max(-this.arenaHalfW + 2.5, Math.min(this.arenaHalfW - 2.5, this.targetPaddleX));
+                    this.vPaddle.x += (this.targetPaddleX - this.vPaddle.x) * 0.3;
+                    this.paddle.position.x = this.vPaddle.x;
+                }
+
+                if (this.gameStarted) {
+                    this.ball.position.x += this.ballVel.x;
+                    this.ball.position.z += this.ballVel.z;
+                    if (Math.abs(this.ball.position.x) > this.arenaHalfW - 0.5) {
+                        this.ballVel.x *= -1; this.ball.position.x = Math.sign(this.ball.position.x) * (this.arenaHalfW - 0.5);
+                    }
+                    if (this.ball.position.z < -this.arenaHeight / 2) {
+                        this.ballVel.z *= -1; this.ball.position.z = -this.arenaHeight / 2;
+                    }
+                    if (this.ball.position.z > this.arenaHeight / 2) this.gameOver();
+                    const dx = this.ball.position.x - this.paddle.position.x;
+                    const dz = this.ball.position.z - this.paddle.position.z;
+                    if (Math.abs(dz) < 0.8 && Math.abs(dx) < 3.0) {
+                        this.ballVel.z = -Math.abs(this.ballVel.z); this.ballVel.x += dx * 0.15;
+                        this.ball.position.z = this.paddle.position.z - 0.8;
+                    }
+                    this.bricks.forEach(brick => {
+                        if (!brick.active) return;
+                        const bdx = this.ball.position.x - brick.position.x;
+                        const bdz = this.ball.position.z - brick.position.z;
+                        if (Math.abs(bdx) < 1.2 && Math.abs(bdz) < 0.7) {
+                            brick.active = false; brick.setParent(null);
+                            this.ballVel.z *= -1; this.score += 50; this.updateScoreUI(); this.updateBrickCount();
+                        }
+                    });
+                }
+
+                if (this.isMobile && this.gameStarted) {
+                    // MOBILE: TRACK BALL
+                    this.camera.position.x += (this.ball.position.x * 0.4 - this.camera.position.x) * 0.1;
+                    this.camera.lookAt([this.ball.position.x * 0.2, 0, 0]);
+                } else {
+                    // PC: STATIC FULL VIEW
+                    this.camera.position.x += (0 - this.camera.position.x) * 0.05;
+                    this.camera.position.y += (35 - this.camera.position.y) * 0.05;
+                    this.camera.position.z += (25 - this.camera.position.z) * 0.05;
+                    this.camera.lookAt([0, 0, 0]);
+                }
+
+                this.renderer.render({ scene: this.scene, camera: this.camera });
+            }
+        }
+
+        const game = new BreakoutGame();
+        document.getElementById('start-btn').onclick = () => game.start();
+
+        window.addEventListener('message', e => {
+            if (!e.data || typeof e.data !== 'object') return;
+            if (e.data.type === 'CONTROL') {
+                if (!game.gameStarted && !game.isGameOver) game.start();
+                if (e.data.key === 'ArrowLeft') game.targetPaddleX = (game.targetPaddleX || 0) - 1.5;
+                if (e.data.key === 'ArrowRight') game.targetPaddleX = (game.targetPaddleX || 0) + 1.5;
+            }
+            if (e.data.type === 'RESTART') { game.reset(); game.start(); }
+        });
+    </script>
+</body>
+</html>

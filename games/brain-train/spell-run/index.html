@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Spell Run 3D</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;800&family=Outfit:wght@700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #2ecc71; /* Forest Green */
+      --secondary: #e67e22; /* Carrot Orange/Brown */
+      --bg: #87CEEB; /* Sky Blue */
+      --glass: rgba(255, 255, 255, 0.2);
+      --border: rgba(255, 255, 255, 0.3);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Plus Jakarta Sans', sans-serif; 
+      background: var(--bg); 
+      color: #2c3e50; 
+      overflow: hidden;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #game-container { position: relative; width: 100vw; height: 100vh; touch-action: none; }
+    
+    .hud {
+      position: absolute;
+      top: 65px; left: 0; right: 0;
+      padding: 0 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .hud-panel {
+      background: var(--glass);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+
+    .word-tray {
+      position: absolute;
+      top: 130px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      z-index: 11;
+      width: 90%;
+    }
+    .word-label {
+      font-size: 0.6rem;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      opacity: 0.8;
+      font-weight: 800;
+      color: #27ae60;
+    }
+    .letters-container {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .letter-slot {
+      width: 34px; height: 34px;
+      background: rgba(255,255,255,0.6);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.1rem;
+      font-weight: 900;
+      color: rgba(0,0,0,0.2);
+      transition: all 0.3s;
+    }
+    .letter-slot.filled {
+      color: white;
+      border-color: #2ecc71;
+      background: #2ecc71;
+      box-shadow: 0 4px 10px rgba(46, 204, 113, 0.4);
+    }
+
+    .stats-group { display: flex; flex-direction: column; gap: 6px; }
+    .stat-item { font-size: 0.75rem; font-weight: 700; color: #34495e; }
+    .stat-val { color: #27ae60; }
+
+    #controls-hint {
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      opacity: 0.5;
+      font-size: 0.7rem;
+      pointer-events: none;
+      width: 100%;
+      color: #2c3e50;
+    }
+
+    /* Controller removed as per request */
+    .pc-controls { display: none !important; }
+
+    @media (max-width: 480px) {
+      .hud { top: 60px; }
+      .word-tray { top: 120px; }
+      .letter-slot { width: 30px; height: 30px; font-size: 0.9rem; }
+    }
+
+    .vitality-container { width: 140px; }
+    .vitality-label { font-size: 0.6rem; font-weight: 800; color: #34495e; margin-bottom: 2px; }
+    .health-bar-bg { width: 100%; height: 8px; background: rgba(0,0,0,0.1); border-radius: 4px; overflow: hidden; }
+    .health-fill { width: 100%; height: 100%; background: #2ecc71; transition: width 0.3s, background 0.3s; }
+    
+    .critical-pulse { animation: pulse-red 0.5s infinite alternate; }
+    @keyframes pulse-red {
+      from { box-shadow: 0 0 5px rgba(231, 76, 60, 0.4); background: rgba(231, 76, 60, 0.2); }
+      to { box-shadow: 0 0 20px rgba(231, 76, 60, 0.8); background: rgba(231, 76, 60, 0.4); }
+    }
+
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+
+  <div id="game-container">
+    <div class="hud">
+      <div class="stats-group">
+        <div class="hud-panel stat-item">SCORE: <span id="score-val" class="stat-val">0</span></div>
+        <div class="hud-panel stat-item">COMBO: <span id="combo-val" class="stat-val">x1.0</span></div>
+      </div>
+      <div class="stats-group">
+        <div class="hud-panel vitality-container">
+          <div class="vitality-label">VITALITY</div>
+          <div class="health-bar-bg">
+            <div id="health-fill" class="health-fill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="word-tray">
+      <div class="word-label">Target Word</div>
+      <div class="letters-container" id="letters-container"></div>
+    </div>
+
+   
+
+    <div class="pc-controls">
+      <div class="pc-row">
+        <div class="ctrl-btn" id="btn-up">↑</div>
+      </div>
+      <div class="pc-row">
+        <div class="ctrl-btn" id="btn-left">←</div>
+        <div class="ctrl-btn" id="btn-down">↓</div>
+        <div class="ctrl-btn" id="btn-right">→</div>
+      </div>
+    </div>
+
+    <div id="three-canvas-container"></div>
+  </div>
+
+  <script src="https://unpkg.com/three@0.152.0/build/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+  
+  <script>
+class SpellRun {
+  constructor() {
+    this.container = document.getElementById('three-canvas-container');
+    this.scoreVal = document.getElementById('score-val');
+    this.comboVal = document.getElementById('combo-val');
+    this.livesVal = document.getElementById('lives-val');
+    this.lettersContainer = document.getElementById('letters-container');
+
+    this.LANES = [-4, 0, 4];
+    this.MOVE_DURATION = 150; // Faster move
+    this.SPEED_BASE = 0.5;
+    this.BLOCK_SPAWN_Z = -120;
+    
+    this.state = {
+      score: 0, combo: 1.0, health: 100, speed: this.SPEED_BASE,
+      decayRate: 1.8, // % per second
+      currentLane: 1, isJumping: false, isCrouching: false,
+      targetWord: "READY", collectedIndex: 0, activeBlocks: [],
+      activeTrees: [], gameRunning: true, clock: new THREE.Clock()
+    };
+    this.init();
+  }
+
+  async init() {
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x87CEEB); 
+    this.scene.fog = new THREE.Fog(0x87CEEB, 30, 160);
+    
+    this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+    this.camera.position.set(0, 5, 12);
+    this.camera.lookAt(0, 2, -10);
+
+    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.container.appendChild(this.renderer.domElement);
+
+    this.scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const sunLight = new THREE.DirectionalLight(0xffffff, 1);
+    sunLight.position.set(20, 40, 20);
+    sunLight.castShadow = true;
+    this.scene.add(sunLight);
+
+    this.createBridge();
+    this.createPlayer();
+    this.setNewWord("READY");
+
+    window.addEventListener('resize', () => this.onResize());
+    window.addEventListener('keydown', (e) => this.handleInput(e));
+    this.setupTouchControls();
+    this.animate();
+    this.spawnLoop();
+    this.treeLoop();
+  }
+
+  createBridge() {
+    const pathGroup = new THREE.Group();
+    const dirtGeo = new THREE.PlaneGeometry(12, 3000);
+    const dirtMat = new THREE.MeshStandardMaterial({ color: 0x7e5130 });
+    const dirt = new THREE.Mesh(dirtGeo, dirtMat);
+    dirt.rotation.x = -Math.PI / 2;
+    dirt.position.z = -500;
+    dirt.receiveShadow = true;
+    pathGroup.add(dirt);
+
+    const grassGeo = new THREE.PlaneGeometry(200, 3000);
+    const grassMat = new THREE.MeshStandardMaterial({ color: 0x2d5a27 });
+    const grass = new THREE.Mesh(grassGeo, grassMat);
+    grass.rotation.x = -Math.PI / 2;
+    grass.position.y = -0.05;
+    grass.position.z = -500;
+    pathGroup.add(grass);
+
+    this.bridge = pathGroup;
+    this.scene.add(pathGroup);
+  }
+
+  createPlayer() {
+    this.player = new THREE.Group();
+    
+    // Visual container for rotations (to avoid clipping ground)
+    this.gopherVisual = new THREE.Group();
+    this.player.add(this.gopherVisual);
+
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x00ADD8 });
+    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const blackMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a });
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdbac });
+
+    // Body (Centered at y=0 in visual group for easier rolling)
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.8, 1.2, 4, 16), bodyMat);
+    this.gopherVisual.add(body);
+
+    // Face features (Facing negative Z - forward)
+    const eyeGeo = new THREE.SphereGeometry(0.25, 16, 16);
+    const lEye = new THREE.Mesh(eyeGeo, whiteMat);
+    lEye.position.set(-0.35, 0.5, -0.6);
+    this.gopherVisual.add(lEye);
+    const rEye = new THREE.Mesh(eyeGeo, whiteMat);
+    rEye.position.set(0.35, 0.5, -0.6);
+    this.gopherVisual.add(rEye);
+
+    const pupGeo = new THREE.SphereGeometry(0.1, 8, 8);
+    const lPup = new THREE.Mesh(pupGeo, blackMat);
+    lPup.position.set(-0.35, 0.5, -0.83);
+    this.gopherVisual.add(lPup);
+    const rPup = new THREE.Mesh(pupGeo, blackMat);
+    rPup.position.set(0.35, 0.5, -0.83);
+    this.gopherVisual.add(rPup);
+
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), blackMat);
+    nose.position.set(0, 0.25, -0.85);
+    this.gopherVisual.add(nose);
+
+    const toothGeo = new THREE.BoxGeometry(0.15, 0.2, 0.1);
+    const lTooth = new THREE.Mesh(toothGeo, whiteMat);
+    lTooth.position.set(-0.08, 0.05, -0.82);
+    this.gopherVisual.add(lTooth);
+    const rTooth = new THREE.Mesh(toothGeo, whiteMat);
+    rTooth.position.set(0.08, 0.05, -0.82);
+    this.gopherVisual.add(rTooth);
+
+    const earGeo = new THREE.SphereGeometry(0.2, 8, 8);
+    const lEar = new THREE.Mesh(earGeo, bodyMat);
+    lEar.position.set(-0.7, 0.9, 0);
+    this.gopherVisual.add(lEar);
+    const rEar = new THREE.Mesh(earGeo, bodyMat);
+    rEar.position.set(0.7, 0.9, 0);
+    this.gopherVisual.add(rEar);
+
+    // Initial position for visual group (raised above ground)
+    this.gopherVisual.position.y = 1.4;
+
+    // Feet (Static on player group)
+    const footGeo = new THREE.CapsuleGeometry(0.15, 0.2, 4, 8);
+    this.lFoot = new THREE.Mesh(footGeo, skinMat);
+    this.lFoot.position.set(-0.4, 0.2, 0);
+    this.player.add(this.lFoot);
+    this.rFoot = new THREE.Mesh(footGeo, skinMat);
+    this.rFoot.position.set(0.4, 0.2, 0);
+    this.player.add(this.rFoot);
+
+    this.player.position.set(this.LANES[this.state.currentLane], 0, 0);
+    this.scene.add(this.player);
+  }
+
+  treeLoop() {
+    if(!this.state.gameRunning) return;
+    this.spawnTree();
+    setTimeout(() => this.treeLoop(), 250);
+  }
+
+  spawnTree() {
+    const side = Math.random() > 0.5 ? 1 : -1;
+    const tree = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.4, 2), new THREE.MeshStandardMaterial({ color: 0x4a3222 }));
+    trunk.position.y = 1;
+    tree.add(trunk);
+    const leaves = new THREE.Mesh(new THREE.ConeGeometry(1.5, 4, 6), new THREE.MeshStandardMaterial({ color: 0x1b4d1b }));
+    leaves.position.y = 3.5;
+    tree.add(leaves);
+    tree.position.set(side * (8 + Math.random() * 15), 0, this.BLOCK_SPAWN_Z);
+    this.scene.add(tree);
+    this.state.activeTrees.push(tree);
+  }
+
+  create3DLetter(char, color) {
+    const group = new THREE.Group();
+    const voxelGeo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+    const voxelMat = new THREE.MeshStandardMaterial({ 
+      color: color, 
+      emissive: color, 
+      emissiveIntensity: 0.5,
+      metalness: 0.5,
+      roughness: 0.2
+    });
+
+    const font = {
+      'A': [0,1,1,1,0, 1,0,0,0,1, 1,1,1,1,1, 1,0,0,0,1, 1,0,0,0,1],
+      'B': [1,1,1,1,0, 1,0,0,0,1, 1,1,1,1,0, 1,0,0,0,1, 1,1,1,1,0],
+      'C': [0,1,1,1,1, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 0,1,1,1,1],
+      'D': [1,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,0],
+      'E': [1,1,1,1,1, 1,0,0,0,0, 1,1,1,1,0, 1,0,0,0,0, 1,1,1,1,1],
+      'F': [1,1,1,1,1, 1,0,0,0,0, 1,1,1,1,0, 1,0,0,0,0, 1,0,0,0,0],
+      'G': [0,1,1,1,1, 1,0,0,0,0, 1,0,1,1,1, 1,0,0,0,1, 0,1,1,1,1],
+      'H': [1,0,0,0,1, 1,0,0,0,1, 1,1,1,1,1, 1,0,0,0,1, 1,0,0,0,1],
+      'I': [1,1,1,1,1, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 1,1,1,1,1],
+      'J': [0,0,1,1,1, 0,0,0,1,0, 0,0,0,1,0, 1,0,0,1,0, 0,1,1,0,0],
+      'K': [1,0,0,0,1, 1,0,0,1,0, 1,1,1,0,0, 1,0,0,1,0, 1,0,0,0,1],
+      'L': [1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,0,0,0,0, 1,1,1,1,1],
+      'M': [1,0,0,0,1, 1,1,0,1,1, 1,0,1,0,1, 1,0,0,0,1, 1,0,0,0,1],
+      'N': [1,0,0,0,1, 1,1,0,0,1, 1,0,1,0,1, 1,0,0,1,1, 1,0,0,0,1],
+      'O': [0,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 0,1,1,1,0],
+      'P': [1,1,1,1,0, 1,0,0,0,1, 1,1,1,1,0, 1,0,0,0,0, 1,0,0,0,0],
+      'Q': [0,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,1,1, 0,1,1,1,1],
+      'R': [1,1,1,1,0, 1,0,0,0,1, 1,1,1,1,0, 1,0,0,1,0, 1,0,0,0,1],
+      'S': [0,1,1,1,1, 1,0,0,0,0, 0,1,1,1,0, 0,0,0,0,1, 1,1,1,1,0],
+      'T': [1,1,1,1,1, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0],
+      'U': [1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 0,1,1,1,0],
+      'V': [1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 0,1,0,1,0, 0,0,1,0,0],
+      'W': [1,0,0,0,1, 1,0,0,0,1, 1,0,1,0,1, 1,1,0,1,1, 1,0,0,0,1],
+      'X': [1,0,0,0,1, 0,1,0,1,0, 0,0,1,0,0, 0,1,0,1,0, 1,0,0,0,1],
+      'Y': [1,0,0,0,1, 0,1,0,1,0, 0,0,1,0,0, 0,0,1,0,0, 0,0,1,0,0],
+      'Z': [1,1,1,1,1, 0,0,0,1,0, 0,0,1,0,0, 0,1,0,0,0, 1,1,1,1,1]
+    };
+
+    const data = font[char] || font['A'];
+    for(let row=0; row<5; row++) {
+      for(let col=0; col<5; col++) {
+        if(data[row*5 + col]) {
+          const voxel = new THREE.Mesh(voxelGeo, voxelMat);
+          voxel.position.set(col*0.4 - 0.8, (4-row)*0.4 - 0.8, 0);
+          group.add(voxel);
+        }
+      }
+    }
+    return group;
+  }
+
+  setNewWord(word) {
+    this.state.targetWord = word.toUpperCase();
+    this.state.collectedIndex = 0;
+    this.lettersContainer.innerHTML = '';
+    for(let char of this.state.targetWord) {
+      const slot = document.createElement('div');
+      slot.className = 'letter-slot';
+      slot.textContent = char;
+      this.lettersContainer.appendChild(slot);
+    }
+  }
+
+  handleInput(e) {
+    if(!this.state.gameRunning) return;
+    switch(e.key) {
+      case 'ArrowLeft': this.changeLane(-1); break;
+      case 'ArrowRight': this.changeLane(1); break;
+      case 'ArrowUp': case ' ': this.jump(); break;
+      case 'ArrowDown': this.crouch(); break;
+    }
+  }
+
+  setupTouchControls() {
+    let sX, sY;
+    const prevent = (e) => { if(e.cancelable) e.preventDefault(); };
+    window.addEventListener('touchstart', e => { sX = e.touches[0].clientX; sY = e.touches[0].clientY; }, { passive: false });
+    window.addEventListener('touchmove', prevent, { passive: false });
+    window.addEventListener('touchend', e => {
+      const dX = e.changedTouches[0].clientX - sX, dY = e.changedTouches[0].clientY - sY;
+      if(Math.abs(dX) > Math.abs(dY)) { if(dX > 40) this.changeLane(1); else if(dX < -40) this.changeLane(-1); }
+      else { if(dY < -40) this.jump(); else if(dY > 40) this.crouch(); }
+    }, { passive: false });
+  }
+
+  changeLane(dir) {
+    const next = THREE.MathUtils.clamp(this.state.currentLane + dir, 0, 2);
+    if(next === this.state.currentLane) return;
+    this.state.currentLane = next;
+    if (window.TWEEN) {
+      new TWEEN.Tween(this.player.position).to({ x: this.LANES[next] }, this.MOVE_DURATION).easing(TWEEN.Easing.Quadratic.Out).start();
+      const rollDir = dir > 0 ? -1 : 1;
+      new TWEEN.Tween(this.gopherVisual.rotation).to({ z: this.gopherVisual.rotation.z + (Math.PI * 2 * rollDir) }, this.MOVE_DURATION).start();
+    } else {
+      this.player.position.x = this.LANES[next];
+    }
+  }
+
+  jump() {
+    if(this.state.isJumping || this.state.isCrouching) return;
+    this.state.isJumping = true;
+    if (window.TWEEN) new TWEEN.Tween(this.player.position).to({ y: 5 }, 350).easing(TWEEN.Easing.Quadratic.Out).chain(
+      new TWEEN.Tween(this.player.position).to({ y: 0 }, 250).easing(TWEEN.Easing.Quadratic.In).onComplete(() => { this.state.isJumping = false; })
+    ).start();
+    else { this.player.position.y = 5; setTimeout(() => { this.player.position.y = 0; this.state.isJumping = false; }, 600); }
+  }
+
+  crouch() {
+    if(this.state.isJumping || this.state.isCrouching) return;
+    this.state.isCrouching = true;
+
+    if (window.TWEEN) {
+      // Sonic-style Spin Roll
+      // 1. Rotate 360 Forward
+      new TWEEN.Tween(this.gopherVisual.rotation)
+        .to({ x: this.gopherVisual.rotation.x - Math.PI * 2 }, 500)
+        .easing(TWEEN.Easing.Quadratic.InOut)
+        .onComplete(() => { this.state.isCrouching = false; })
+        .start();
+
+      // 2. Lower to ground (hug the dirt)
+      new TWEEN.Tween(this.gopherVisual.position)
+        .to({ y: 0.8 }, 200)
+        .easing(TWEEN.Easing.Quadratic.Out)
+        .chain(new TWEEN.Tween(this.gopherVisual.position).to({ y: 1.4 }, 200).delay(100).easing(TWEEN.Easing.Quadratic.In))
+        .start();
+
+      // 3. Squish into a ball
+      new TWEEN.Tween(this.gopherVisual.scale)
+        .to({ y: 0.7, x: 1.1, z: 1.1 }, 200)
+        .chain(new TWEEN.Tween(this.gopherVisual.scale).to({ y: 1, x: 1, z: 1 }, 200).delay(100))
+        .start();
+
+    } else {
+      this.state.isCrouching = false;
+    }
+  }
+
+  spawnLoop() {
+    if(!this.state.gameRunning) return;
+    setTimeout(() => { this.spawnBlock(); this.spawnLoop(); }, 1000 + Math.random() * 800);
+  }
+
+  spawnBlock() {
+    const laneIdx = Math.floor(Math.random() * 3);
+    const isHazard = Math.random() > 0.8;
+    const isTarget = !isHazard && Math.random() > 0.4;
+    const char = isTarget ? this.state.targetWord[this.state.collectedIndex] : String.fromCharCode(65 + Math.floor(Math.random() * 26));
+    
+    let block;
+    if (isHazard) {
+      const type = Math.random() > 0.5 ? 'LOG' : 'BRANCH';
+      if (type === 'LOG') {
+        block = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 4, 8), new THREE.MeshStandardMaterial({ color: 0x4a2c1a }));
+        block.rotation.z = Math.PI / 2; block.position.set(this.LANES[laneIdx], 0.8, this.BLOCK_SPAWN_Z);
+      } else {
+        block = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 10, 8), new THREE.MeshStandardMaterial({ color: 0x4a2c1a }));
+        block.rotation.z = Math.PI / 2; block.position.set(0, 4.5, this.BLOCK_SPAWN_Z);
+      }
+      block.userData = { isHazard: true };
+    } else {
+      const h = Math.random() > 0.8 ? 4 : 1.2;
+      const color = isTarget ? 0xff6600 : 0x9933ff; // Vibrant Orange / Purple
+      block = this.create3DLetter(char, color);
+      block.position.set(this.LANES[laneIdx], h, this.BLOCK_SPAWN_Z);
+      block.userData = { char, isTarget, isHazard: false, baseH: h };
+    }
+    this.scene.add(block);
+    this.state.activeBlocks.push(block);
+  }
+
+  animate() {
+    requestAnimationFrame(() => this.animate());
+    if (window.TWEEN) TWEEN.update();
+    if(this.state.gameRunning) {
+      const dt = this.state.clock.getDelta();
+      const time = this.state.clock.getElapsedTime();
+
+      // Health Decay
+      this.state.health -= this.state.decayRate * dt * (1 + (this.state.speed - this.SPEED_BASE) * 2);
+      this.updateHealthUI();
+      if(this.state.health <= 0) this.gameOver();
+
+      // Running Bobbing Animation (relative to 1.4 baseline)
+      if (!this.state.isJumping && !this.state.isCrouching) {
+        this.gopherVisual.position.y = 1.4 + Math.abs(Math.sin(time * 12)) * 0.3;
+        this.gopherVisual.rotation.y = Math.sin(time * 12) * 0.1;
+      } else if (this.state.isJumping) {
+        this.gopherVisual.position.y = 1.4; // Keep relative y constant during jump
+      }
+
+      for(let i = this.state.activeBlocks.length - 1; i >= 0; i--) {
+        const b = this.state.activeBlocks[i]; b.position.z += this.state.speed * 60 * dt;
+        
+        // Letter Bobbing and Rotation
+        if (!b.userData.isHazard) {
+          b.position.y = b.userData.baseH + Math.sin(time * 5 + b.position.z * 0.1) * 0.3;
+          b.rotation.y += dt * 2;
+        }
+
+        if(b.position.distanceTo(this.player.position) < 2.5) { this.handleCollision(b); this.cleanupBlock(b, i); continue; }
+        if(b.position.z > 20) this.cleanupBlock(b, i);
+      }
+      for(let i = this.state.activeTrees.length - 1; i >= 0; i--) {
+        const t = this.state.activeTrees[i]; t.position.z += this.state.speed * 60 * dt;
+        if(t.position.z > 20) { this.scene.remove(t); this.state.activeTrees.splice(i, 1); }
+      }
+      this.bridge.position.z += this.state.speed;
+      if(this.bridge.position.z > 500) this.bridge.position.z = -500;
+      
+      // Speed shake
+      if (this.state.speed > 0.8) {
+        this.camera.position.x = (Math.random() - 0.5) * (this.state.speed - 0.7) * 0.5;
+        this.camera.position.y = 5 + (Math.random() - 0.5) * (this.state.speed - 0.7) * 0.5;
+      }
+    }
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  handleCollision(block) {
+    const { char, isTarget, isHazard } = block.userData;
+    
+    if (isHazard) { 
+      this.state.health -= 25; 
+      this.state.combo = 1.0;
+      this.flashScreen('rgba(231, 76, 60, 0.3)');
+    }
+    else if(isTarget && char === this.state.targetWord[this.state.collectedIndex]) {
+      this.state.score += 100 * this.state.combo; 
+      this.state.combo += 0.2;
+      this.state.health = Math.min(100, this.state.health + 12); // Heal on correct letter
+      
+      const slots = this.lettersContainer.children; 
+      if(slots[this.state.collectedIndex]) slots[this.state.collectedIndex].classList.add('filled');
+      this.state.collectedIndex++;
+      
+      if(this.state.collectedIndex >= this.state.targetWord.length) {
+        this.state.score += 500; 
+        this.state.speed += 0.05;
+        this.state.health = Math.min(100, this.state.health + 30); // Big heal on word
+        setTimeout(() => { this.setNewWord(["CAMPING", "JOURNEY", "STREAK", "ACTION", "WILDERNESS"][Math.floor(Math.random() * 5)]); }, 500);
+      }
+    } else { 
+      this.state.health -= 20; // Penalty for wrong letter
+      this.state.combo = 1.0; 
+      this.flashScreen('rgba(231, 76, 60, 0.2)');
+    }
+    
+    this.scoreVal.textContent = Math.floor(this.state.score); 
+    this.comboVal.textContent = `x${this.state.combo.toFixed(1)}`;
+  }
+
+  flashScreen(color) {
+    const flash = document.createElement('div');
+    flash.style.position = 'fixed'; flash.style.inset = '0'; flash.style.background = color;
+    flash.style.pointerEvents = 'none'; flash.style.zIndex = '100'; flash.style.transition = 'opacity 0.3s';
+    document.body.appendChild(flash);
+    setTimeout(() => { flash.style.opacity = '0'; setTimeout(() => flash.remove(), 300); }, 50);
+  }
+
+  updateHealthUI() {
+    const fill = document.getElementById('health-fill');
+    const container = fill.parentElement.parentElement;
+    const pct = Math.max(0, this.state.health);
+    fill.style.width = pct + '%';
+    
+    if(pct > 60) fill.style.background = '#2ecc71';
+    else if(pct > 30) fill.style.background = '#f1c40f';
+    else {
+      fill.style.background = '#e74c3c';
+      container.classList.add('critical-pulse');
+    }
+    if(pct > 30) container.classList.remove('critical-pulse');
+  }
+  cleanupBlock(b, i) { this.scene.remove(b); this.state.activeBlocks.splice(i, 1); }
+  gameOver() { this.state.gameRunning = false; alert("GAME OVER! Score: " + this.state.score); window.location.reload(); }
+  onResize() { this.camera.aspect = window.innerWidth / window.innerHeight; this.camera.updateProjectionMatrix(); this.renderer.setSize(window.innerWidth, window.innerHeight); }
+}
+new SpellRun();
+  </script>
+</body>
+</html>
+</body>
+</html>

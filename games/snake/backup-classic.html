@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Snake Classic</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a1a;display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;font-family:'Courier New',monospace;touch-action:none}
+canvas{display:block;border:2px solid rgba(0,245,255,0.4);border-radius:8px;box-shadow:0 0 30px rgba(0,245,255,0.3)}
+#msg{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#00f5ff;background:rgba(0,0,0,.88);padding:2rem 3rem;border-radius:12px;border:1px solid rgba(0,245,255,.3);display:none}
+#msg h2{font-size:1.4rem;margin-bottom:.5rem}
+#msg p{font-size:.85rem;opacity:.7;margin-bottom:.5rem}
+#msg span{font-size:1rem;color:#bf00ff;display:block}
+#pause-msg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;font-family:'Courier New',monospace}
+#pause-msg div{text-align:center;color:#00f5ff;font-size:1.5rem;font-weight:700;text-shadow:0 0 20px #00f5ff;letter-spacing:3px}
+#pause-msg p{font-size:.8rem;color:rgba(0,245,255,.6);margin-top:.5rem;letter-spacing:2px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="msg">
+  <h2 id="mh">Tap joystick to start</h2>
+  <p id="mp">Arrow keys or WASD</p>
+  <span id="ms"></span>
+</div>
+<div id="pause-msg">
+  <div>⏸ PAUSED<p>Resume from the game menu</p></div>
+</div>
+<script>
+const canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+const CELL = 20;
+let cols, rows, W, H;
+let snake = [], dir = {x:1,y:0}, nextDir = {x:1,y:0}, food = null, score = 0, best = 0, running = false, loop;
+
+function resize() {
+  const maxW = Math.min(window.innerWidth - 10, 500);
+  const maxH = Math.min(window.innerHeight - 10, 500);
+  cols = Math.floor(maxW / CELL); rows = Math.floor(maxH / CELL);
+  W = cols * CELL; H = rows * CELL;
+  canvas.width = W; canvas.height = H;
+}
+
+function rand(max) { return Math.floor(Math.random() * max); }
+
+function placeFood() {
+  let pos;
+  do { pos = { x: rand(cols), y: rand(rows) }; }
+  while (snake.some(s => s.x === pos.x && s.y === pos.y));
+  food = pos;
+}
+
+function notify(type, data) { window.parent.postMessage({ type, ...data }, '*'); }
+
+function init() {
+  snake = [{ x: Math.floor(cols / 2), y: Math.floor(rows / 2) }];
+  dir = { x: 1, y: 0 }; nextDir = { x: 1, y: 0 }; score = 0;
+  placeFood();
+}
+
+function start() {
+  running = true;
+  document.getElementById('msg').style.display = 'none';
+  init(); clearInterval(loop);
+  loop = setInterval(tick, 130);
+}
+
+// Notify parent shell immediately when iframe is ready
+notify('GAME_READY', { title: 'Snake Classic' });
+
+function tick() {
+  dir = { ...nextDir };
+  const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+  if (head.x < 0 || head.x >= cols || head.y < 0 || head.y >= rows || snake.some(s => s.x === head.x && s.y === head.y)) {
+    clearInterval(loop); running = false;
+    if (score > best) best = score;
+    notify('GAME_OVER', { score, best });
+    const msg = document.getElementById('msg');
+    msg.style.display = 'block';
+    document.getElementById('mh').textContent = 'Game Over!';
+    document.getElementById('mp').textContent = 'Use joystick or any key to play again';
+    document.getElementById('ms').textContent = 'Score: ' + score;
+    return;
+  }
+  snake.unshift(head);
+  if (head.x === food.x && head.y === food.y) {
+    score++; placeFood(); notify('SCORE_UPDATE', { score });
+  } else { snake.pop(); }
+  draw();
+}
+
+function draw() {
+  ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)'; ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x += CELL) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y <= H; y += CELL) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  if (snake.length > 0) {
+    snake.forEach((s, i) => {
+      const a = i === 0 ? 1 : Math.max(0.3, 1 - i / snake.length);
+      ctx.fillStyle = i === 0 ? '#00f5ff' : `rgba(0,200,220,${a})`;
+      if (i === 0) { ctx.shadowColor = '#00f5ff'; ctx.shadowBlur = 12; }
+      ctx.beginPath(); ctx.roundRect(s.x * CELL + 1, s.y * CELL + 1, CELL - 2, CELL - 2, i === 0 ? 4 : 2); ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+  }
+  if (food) {
+    ctx.fillStyle = '#ff006e'; ctx.shadowColor = '#ff006e'; ctx.shadowBlur = 15;
+    ctx.beginPath(); ctx.arc(food.x * CELL + CELL / 2, food.y * CELL + CELL / 2, CELL / 2 - 2, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+}
+
+function setDir(nx, ny) { if (nx === -dir.x && ny === -dir.y) return; nextDir = { x: nx, y: ny }; }
+
+// ── Keyboard ──
+document.addEventListener('keydown', e => {
+  if (!running) { start(); return; }
+  const k = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0], w:[0,-1], s:[0,1], a:[-1,0], d:[1,0] };
+  const m = k[e.key] || k[e.key?.toLowerCase()];
+  if (m) { e.preventDefault(); setDir(m[0], m[1]); }
+});
+
+// ── Shell postMessage (joystick, pause, resume) ──
+window.addEventListener('message', e => {
+  if (!e.data || typeof e.data !== 'object') return;
+  if (e.data.type === 'CONTROL') {
+    // Any joystick / key press starts the game if not running
+    if (!running && !document.getElementById('pause-msg').style.display.includes('flex')) {
+      start(); return;
+    }
+    const k = { ArrowUp:[0,-1], ArrowDown:[0,1], ArrowLeft:[-1,0], ArrowRight:[1,0] };
+    const m = k[e.data.key];
+    if (m && running) setDir(m[0], m[1]);
+  }
+  if (e.data.type === 'PAUSE') {
+    if (running) {
+      clearInterval(loop); running = false;
+      document.getElementById('pause-msg').style.display = 'flex';
+    }
+  }
+  if (e.data.type === 'RESUME') {
+    document.getElementById('pause-msg').style.display = 'none';
+    if (!running && snake.length > 0) {
+      running = true;
+      loop = setInterval(tick, 130);
+    }
+  }
+});
+
+resize();
+window.addEventListener('resize', () => { resize(); if (running) draw(); });
+document.getElementById('msg').style.display = 'block';
+draw();
+</script>
+</body>
+</html>

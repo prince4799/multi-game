@@ -1,0 +1,36 @@
+/* Backup of original app.js before OGL redesign — 2026-04-29 */
+/* See backup/style.css and backup/index.html for the other files */
+/* This file is a backup copy. The original is at ../app.js */
+
+/* ── APP BOOTSTRAP ── */
+const App = (() => {
+  function navigate(route, param) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-link, .mobile-link').forEach(l => l.classList.remove('active'));
+
+    if (route === 'home' || !route) {
+      document.getElementById('page-home')?.classList.add('active');
+      document.querySelectorAll('[data-route="home"]').forEach(l => l.classList.add('active'));
+      history.replaceState(null, '', '#home');
+      GameRegistry.renderHome();
+    } else if (route === 'category' && param) {
+      document.getElementById('page-category')?.classList.add('active');
+      document.querySelectorAll(`[data-cat="${param}"]`).forEach(l => l.classList.add('active'));
+      history.replaceState(null, '', `#category/${param}`);
+      GameRegistry.renderCategory(param);
+    } else if (route === 'profile') {
+      document.getElementById('page-profile')?.classList.add('active');
+      history.replaceState(null, '', '#profile');
+      renderProfile();
+    } else if (route === 'leaderboard') {
+      document.getElementById('page-leaderboard')?.classList.add('active');
+      history.replaceState(null, '', '#leaderboard');
+    } else {
+      navigate('home');
+    }
+    window.scrollTo(0, 0);
+  }
+
+  // ... (truncated - original app.js backup)
+  return {};
+})();

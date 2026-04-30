@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snake OGL | Premium 3D Arcade</title>
+    <meta name="description" content="A high-performance 3D Snake game built with OGL. Optimized for local file loading.">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/ogl/dist/ogl.umd.js"></script>
+    <style>
+        #minimap-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            width: 120px;
+            height: 120px;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            z-index: 20;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #minimap { width: 100px; height: 100px; }
+        @media (max-width: 600px) {
+            #minimap-container { width: 90px; height: 90px; top: 0.5rem; right: 0.5rem; }
+            #minimap { width: 80px; height: 80px; }
+        }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <div id="hud">
+        <div class="score-card">
+            <span class="score-label">Score</span>
+            <span id="score" class="score-value">0</span>
+        </div>
+    </div>
+    <div id="minimap-container"><canvas id="minimap" width="100" height="100"></canvas></div>
+    <div id="overlay">
+        <div class="menu-card">
+            <h1 id="status-text">Snake OGL</h1>
+            <p>Master the 3D grid with ultra-smooth 60FPS motion.</p>
+            <button id="start-btn">Start Game</button>
+            <div class="controls-hint">
+                <div class="control-item">
+                    <span class="key">Arrows</span>
+                    <span class="key">WASD</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { Renderer, Camera, Transform, Box, Program, Mesh, Color } = ogl;
+
+        const vertex = /* glsl */ `
+            attribute vec3 position;
+            attribute vec3 normal;
+            uniform mat4 modelViewMatrix;
+            uniform mat4 projectionMatrix;
+            uniform mat3 normalMatrix;
+            varying vec3 vNormal;
+            void main() {
+                vNormal = normalize(normalMatrix * normal);
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const fragment = /* glsl */ `
+            precision highp float;
+            uniform vec3 uColor;
+            varying vec3 vNormal;
+            void main() {
+                float lighting = dot(vNormal, normalize(vec3(0.5, 1.0, 0.5))) * 0.5 + 0.5;
+                float rim = 1.0 - max(0.0, dot(vNormal, vec3(0.0, 0.0, 1.0)));
+                rim = pow(rim, 3.0);
+                vec3 color = uColor * lighting + rim * 0.5;
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        class SnakeGame {
+            constructor() {
+                this.renderer = new Renderer({ dpr: 2, antialias: true });
+                this.gl = this.renderer.gl;
+                document.getElementById('canvas-container').appendChild(this.gl.canvas);
+
+                this.camera = new Camera(this.gl, { fov: 45 });
+                this.scene = new Transform();
+                this.gridSize = 20;
+                this.gridHalf = this.gridSize / 2;
+                
+                this.mapCanvas = document.getElementById('minimap');
+                this.mapCtx = this.mapCanvas.getContext('2d');
+
+                this.initGeometries();
+                this.initObjects();
+                this.reset();
+                
+                window.addEventListener('resize', () => this.resize(), false);
+                this.resize();
+                window.addEventListener('keydown', (e) => this.onKeyDown(e));
+                
+                this.touchStart = { x: 0, y: 0 };
+                window.addEventListener('touchstart', (e) => {
+                    this.touchStart.x = e.touches[0].clientX;
+                    this.touchStart.y = e.touches[0].clientY;
+                }, { passive: true });
+
+                window.addEventListener('touchend', (e) => {
+                    const dx = e.changedTouches[0].clientX - this.touchStart.x;
+                    const dy = e.changedTouches[0].clientY - this.touchStart.y;
+                    if (Math.abs(dx) > Math.abs(dy)) {
+                        if (Math.abs(dx) > 30) this.onKeyDown({ key: dx > 0 ? 'd' : 'a' });
+                    } else {
+                        if (Math.abs(dy) > 30) this.onKeyDown({ key: dy > 0 ? 's' : 'w' });
+                    }
+                }, { passive: true });
+
+                this.lastUpdateTime = 0;
+                this.updateInterval = 150; 
+                this.vHead = { x: 0, z: 0 };
+                
+                requestAnimationFrame((t) => this.update(t));
+            }
+
+            initGeometries() {
+                this.cubeGeometry = new Box(this.gl);
+                this.planeGeometry = new Box(this.gl, { width: this.gridSize, height: 0.1, depth: this.gridSize });
+            }
+
+            initObjects() {
+                const groundProgram = new Program(this.gl, { vertex, fragment: `precision highp float; void main() { gl_FragColor = vec4(0.05, 0.05, 0.08, 1.0); }` });
+                this.ground = new Mesh(this.gl, { geometry: this.planeGeometry, program: groundProgram });
+                this.ground.position.y = -0.55;
+                this.ground.setParent(this.scene);
+
+                const gridProgram = new Program(this.gl, { vertex, fragment: `precision highp float; void main() { gl_FragColor = vec4(0.2, 0.2, 0.3, 1.0); }` });
+                for (let i = 0; i <= this.gridSize; i++) {
+                    const lx = new Mesh(this.gl, { geometry: new Box(this.gl, { width: 0.05, height: 0.01, depth: this.gridSize }), program: gridProgram });
+                    lx.position.set(i - this.gridHalf, -0.5, 0); lx.setParent(this.scene);
+                    const lz = new Mesh(this.gl, { geometry: new Box(this.gl, { width: this.gridSize, height: 0.01, depth: 0.05 }), program: gridProgram });
+                    lz.position.set(0, -0.5, i - this.gridHalf); lz.setParent(this.scene);
+                }
+
+                this.snakeProgram = new Program(this.gl, { vertex, fragment, uniforms: { uColor: { value: new Color('#00f2ff') } } });
+                this.foodProgram = new Program(this.gl, { vertex, fragment, uniforms: { uColor: { value: new Color('#ff007a') } } });
+                this.foodMesh = new Mesh(this.gl, { geometry: this.cubeGeometry, program: this.foodProgram });
+                this.foodMesh.setParent(this.scene);
+            }
+
+            reset() {
+                this.snake = [{ x: 0, z: 0 }, { x: 0, z: 1 }, { x: 0, z: 2 }];
+                this.prevHead = { x: 0, z: 0 };
+                this.direction = { x: 0, z: -1 };
+                this.nextDirection = { x: 0, z: -1 };
+                this.score = 0;
+                this.isGameOver = false;
+                this.gameStarted = false;
+                this.lastUpdateTime = 0;
+                this.vHead = { x: 0.5, z: 0.5 };
+                this.updateScoreUI(); this.spawnFood(); this.updateSnakeMeshes();
+                document.getElementById('overlay').classList.remove('hidden');
+                document.getElementById('status-text').innerText = 'Ready to Play?';
+            }
+
+            start() { if (this.isGameOver) this.reset(); this.gameStarted = true; this.isGameOver = false; document.getElementById('overlay').classList.add('hidden'); }
+
+            onKeyDown(e) {
+                if (!this.gameStarted && (e.key === 'Enter' || e.key === ' ')) { this.start(); return; }
+                switch (e.key) {
+                    case 'ArrowUp': case 'w': case 'W': if (this.direction.z !== 1) this.nextDirection = { x: 0, z: -1 }; break;
+                    case 'ArrowDown': case 's': case 'S': if (this.direction.z !== -1) this.nextDirection = { x: 0, z: 1 }; break;
+                    case 'ArrowLeft': case 'a': case 'A': if (this.direction.x !== 1) this.nextDirection = { x: -1, z: 0 }; break;
+                    case 'ArrowRight': case 'd': case 'D': if (this.direction.x !== -1) this.nextDirection = { x: 1, z: 0 }; break;
+                }
+            }
+
+            spawnFood() {
+                let newPos;
+                while (true) {
+                    newPos = { x: Math.floor(Math.random() * this.gridSize) - this.gridHalf, z: Math.floor(Math.random() * this.gridSize) - this.gridHalf };
+                    if (!this.snake.some(s => s.x === newPos.x && s.z === newPos.z)) break;
+                }
+                this.food = newPos; this.foodMesh.position.set(this.food.x + 0.5, 0, this.food.z + 0.5);
+            }
+
+            updateSnakeMeshes() {
+                if (this.snakeMeshes) this.snakeMeshes.forEach(m => m.setParent(null));
+                this.snakeMeshes = this.snake.map((pos, i) => {
+                    const m = new Mesh(this.gl, { geometry: this.cubeGeometry, program: this.snakeProgram });
+                    m.position.set(pos.x + 0.5, 0, pos.z + 0.5); m.scale.set(i === 0 ? 1.1 : 0.9);
+                    m.setParent(this.scene); return m;
+                });
+            }
+
+            move() {
+                this.direction = this.nextDirection;
+                this.prevHead = { x: this.snake[0].x, z: this.snake[0].z };
+                const head = { x: this.snake[0].x + this.direction.x, z: this.snake[0].z + this.direction.z };
+                if (head.x < -this.gridHalf || head.x >= this.gridHalf || head.z < -this.gridHalf || head.z >= this.gridHalf || this.snake.some(s => s.x === head.x && s.z === head.z)) {
+                    this.gameOver(); return;
+                }
+                this.snake.unshift(head);
+                if (head.x === this.food.x && head.z === this.food.z) {
+                    this.score += 10; this.updateScoreUI(); this.spawnFood();
+                    this.updateInterval = Math.max(50, 150 - Math.floor(this.score / 20) * 5);
+                } else { this.snake.pop(); }
+                this.updateSnakeMeshes();
+            }
+
+            gameOver() { this.isGameOver = true; this.gameStarted = false; document.getElementById('overlay').classList.remove('hidden'); document.getElementById('status-text').innerText = 'Game Over'; }
+
+            updateScoreUI() { document.getElementById('score').innerText = this.score; }
+
+            drawMinimap() {
+                const ctx = this.mapCtx; const cw = this.mapCanvas.width; const scale = cw / this.gridSize;
+                ctx.clearRect(0, 0, cw, cw); ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)'; ctx.strokeRect(0, 0, cw, cw);
+                this.snake.forEach((pos, i) => {
+                    ctx.fillStyle = i === 0 ? '#00f2ff' : 'rgba(0, 242, 255, 0.5)';
+                    ctx.fillRect((pos.x + this.gridHalf) * scale, (pos.z + this.gridHalf) * scale, scale, scale);
+                });
+                ctx.fillStyle = '#ff007a'; ctx.fillRect((this.food.x + this.gridHalf) * scale, (this.food.z + this.gridHalf) * scale, scale, scale);
+            }
+
+            resize() { 
+                this.renderer.setSize(window.innerWidth, window.innerHeight); 
+                this.camera.perspective({ aspect: this.gl.canvas.width / this.gl.canvas.height }); 
+                this.isMobile = window.innerWidth < 600;
+            }
+
+            update(t) {
+                requestAnimationFrame((t) => this.update(t));
+                if (this.gameStarted && !this.isGameOver) {
+                    if (t - this.lastUpdateTime > this.updateInterval) {
+                        this.move(); this.lastUpdateTime = t;
+                    }
+                    
+                    const progress = Math.min(1, (t - this.lastUpdateTime) / this.updateInterval);
+                    const head = this.snake[0];
+                    const visualHeadX = this.prevHead.x + (head.x - this.prevHead.x) * progress + 0.5;
+                    const visualHeadZ = this.prevHead.z + (head.z - this.prevHead.z) * progress + 0.5;
+
+                    if (this.isMobile) {
+                        // MOBILE: DYNAMIC FOLLOW
+                        this.camera.position.x += (visualHeadX - this.camera.position.x) * 0.1;
+                        this.camera.position.y += (18 - this.camera.position.y) * 0.1;
+                        this.camera.position.z += ((visualHeadZ + 12) - this.camera.position.z) * 0.1;
+                        this.camera.lookAt([visualHeadX, 0, visualHeadZ]);
+                    } else {
+                        // PC: FULL VIEW STATIC
+                        this.camera.position.x += (0 - this.camera.position.x) * 0.05;
+                        this.camera.position.y += (22 - this.camera.position.y) * 0.05;
+                        this.camera.position.z += (12 - this.camera.position.z) * 0.05;
+                        this.camera.lookAt([0, 0, 0]);
+                    }
+                    
+                    if (this.snakeMeshes && this.snakeMeshes[0]) {
+                        this.snakeMeshes[0].position.set(visualHeadX, 0, visualHeadZ);
+                    }
+                } else if (!this.gameStarted) {
+                    const angle = t * 0.0002;
+                    this.camera.position.set(Math.sin(angle) * 15, 20, Math.cos(angle) * 15);
+                    this.camera.lookAt([0, 0, 0]);
+                }
+                this.drawMinimap();
+                this.renderer.render({ scene: this.scene, camera: this.camera });
+            }
+        }
+        const game = new SnakeGame();
+        document.getElementById('start-btn').onclick = () => game.start();
+        window.addEventListener('message', e => {
+            if (!e.data || typeof e.data !== 'object') return;
+            if (e.data.type === 'CONTROL') {
+                if (!game.gameStarted && !game.isGameOver) game.start();
+                const k = { ArrowUp: 'w', ArrowDown: 's', ArrowLeft: 'a', ArrowRight: 'd' };
+                if (k[e.data.key]) game.onKeyDown({ key: k[e.data.key] });
+            }
+            if (e.data.type === 'RESTART') { game.reset(); game.start(); }
+        });
+    </script>
+</body>
+</html>
